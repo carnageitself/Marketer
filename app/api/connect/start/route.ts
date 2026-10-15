@@ -17,8 +17,8 @@ export async function GET(req: NextRequest) {
   const origin = appOrigin(req);
   const via = p.get("via") as Via;
   const intent = (p.get("intent") ?? "dns") as Intent;
-  const r = await requireSite(p.get("site") ?? "");
-  if (r instanceof NextResponse) return finish(origin, null, false, "Sign in to Pagewise first");
+  const r = await requireSite(p.get("site") ?? "", "editor");
+  if (r instanceof NextResponse) return finish(origin, null, false, r.status === 403 ? "You need editor access to change this website's setup." : "Sign in to Pagewise first");
   const site = r.site;
   const state = newState();
 

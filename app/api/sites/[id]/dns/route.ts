@@ -13,7 +13,7 @@ import { appOrigin, patchSite, requireSite, withLog } from "@/lib/sites";
 export const runtime = "nodejs";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requireSite((await params).id);
+  const r = await requireSite((await params).id, "editor");
   if (r instanceof NextResponse) return r;
   let site = r.site;
   const body = await req.json().catch(() => ({})) as { action?: string; provider?: string; creds?: Creds };

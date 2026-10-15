@@ -12,7 +12,7 @@ const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) =>
 export const SESSION_COOKIE = "pw_session";
 const SESSION_DAYS = 30;
 
-export interface SessionUser { id: string; email: string; name: string | null }
+export interface SessionUser { id: string; email: string; name: string | null; plan: string }
 
 export const newId = (prefix: string, bytes = 12) => `${prefix}_${randomBytes(bytes).toString("base64url")}`;
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -53,7 +53,7 @@ export async function currentUser(): Promise<SessionUser | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
   return one<SessionUser>(
-    `select u.id, u.email, u.name from auth_sessions s join users u on u.id = s.user_id
+    `select u.id, u.email, u.name, u.plan from auth_sessions s join users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now()`,
     [sha256(token)],
   );

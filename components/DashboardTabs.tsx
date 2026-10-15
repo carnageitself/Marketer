@@ -1,7 +1,7 @@
 "use client";
 // Pages, Sections, Visitors (with visit replay) and Settings tabs.
 import { useState } from "react";
-import { Badge, BarList, Button, Card, Empty, Loading, Table, field, fmt } from "./ui";
+import { Badge, BarList, Button, Card, Empty, Loading, Table, Upsell, field, fmt } from "./ui";
 import { Icon } from "./icons";
 import { useReport } from "./useReport";
 import type { SiteProps } from "./Dashboard";
@@ -18,7 +18,7 @@ export function PagesTab({ siteId, range }: { siteId: string; range: string }) {
   if (!data) return <Card><Loading rows={6} /></Card>;
   return (
     <div className="space-y-6">
-      <Card title="Pages" action={<span className="text-[12px] text-muted">Click a page for scroll depth, clicks and flow</span>}>
+      <Card title="Pages" action={<span className="hidden text-[12px] text-muted sm:inline">Click a page for scroll depth, clicks and flow</span>}>
         <Table head={["Page", "Views", "Visitors", "Avg. time", "Scroll", "Entrances", "Exits"]}
           rows={data.pages.map(p => [
             <button key="p" className="text-left text-accent hover:underline" onClick={() => setPath(s(p.path))}>{s(p.path)}</button>,
@@ -101,7 +101,7 @@ export function SectionsTab({ siteId, range }: { siteId: string; range: string }
         </select>
       </div>
       <Card title="Reading funnel" subtitle="How far down the page people get, and what each section is worth"
-        action={<span className="text-[12px] text-muted">Top to bottom in page order</span>}>
+        action={<span className="hidden text-[12px] text-muted sm:inline">Top to bottom in page order</span>}>
         {!secs.data ? <Loading rows={6} /> : !rows.length ? <Empty>No sections seen on this page yet.</Empty> : (
           <div className="space-y-1">
             <div className="hidden grid-cols-[1fr_90px_90px_80px_150px] gap-3 px-1 pb-1 text-[11px] uppercase tracking-wide text-muted md:grid">
@@ -180,7 +180,7 @@ export function VisitorsTab({ siteId, range }: { siteId: string; range: string }
           </div>
         )}
       </Card>
-      <div className="xl:sticky xl:top-8 xl:self-start">
+      <div className="min-w-0 xl:sticky xl:top-8 xl:self-start">
         {open ? <Journey siteId={siteId} visitId={open} onOpen={setOpen} /> : <Card title="Visit replay"><Empty>Pick a visit to see every page, section and click in order.</Empty></Card>}
       </div>
     </div>
@@ -195,7 +195,8 @@ interface JourneyT {
 }
 
 function Journey({ siteId, visitId, onOpen }: { siteId: string; visitId: string; onOpen: (id: string) => void }) {
-  const { data, error } = useReport<JourneyT>(siteId, "journey", { visit: visitId });
+  const { data, error, upgrade } = useReport<JourneyT>(siteId, "journey", { visit: visitId });
+  if (upgrade) return <Card title="Visit replay"><Upsell title="Replay any visit">Follow one visitor page by page and section by section, with every click in order. No screen recording, no cookies.</Upsell></Card>;
   if (error) return <Card title="Visit replay"><Empty>{error}</Empty></Card>;
   if (!data) return <Card title="Visit replay"><Loading rows={6} /></Card>;
   const v = data.visit;
@@ -257,7 +258,9 @@ const GOAL_TYPES = [
   { id: "event", label: "Custom event named", hint: "From pagewise('track', 'Signed up')" },
 ] as const;
 
-export function SettingsTab({ site }: { site: SiteProps }) {
+export function SettingsTab({ site, role }: { site: SiteProps; role: string }) {
+  const canEdit = role !== "viewer";
+  const canDelete = role === "owner" || role === "admin";
   const [goals, setGoals] = useState(site.goals);
   const [persistent, setPersistent] = useState(!!site.settings.persistentIds);
   const [msg, setMsg] = useState("");
@@ -268,7 +271,9 @@ export function SettingsTab({ site }: { site: SiteProps }) {
     setMsg(res.ok ? "Saved ✓" : d.error ?? "Failed");
   };
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+    <>
+    {!canEdit && <ReadOnly />}
+    <fieldset disabled={!canEdit} className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
       <Card title="Conversion goals" subtitle="A visit counts as converted when it matches any goal. Patterns are case-insensitive regular expressions."
         action={msg && <Badge tone={msg.startsWith("Saved") ? "good" : "bad"}>{msg}</Badge>}>
         <div className="space-y-2.5">
@@ -294,7 +299,7 @@ export function SettingsTab({ site }: { site: SiteProps }) {
         </div>
       </Card>
 
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6">
         <Card title={<span className="flex items-center gap-2"><Icon name="shield" size={15} className="text-accent" />Privacy</span>}>
           <label className="flex cursor-pointer items-start gap-3 text-[13px]">
             <input type="checkbox" checked={persistent} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" onChange={e => { setPersistent(e.target.checked); save({ settings: { persistentIds: e.target.checked } }); }} />
@@ -316,15 +321,24 @@ export function SettingsTab({ site }: { site: SiteProps }) {
           </div>
         </Card>
 
-        <Card title="Danger zone" className="border-bad/25">
+        {canDelete && <Card title="Danger zone" className="border-bad/25">
           <p className="mb-3 text-[13px] text-muted">Deletes {site.domain} and every visit, page view and click recorded for it.</p>
           <Button variant="danger" onClick={async () => {
             if (!confirm(`Delete ${site.domain} and all of its data? This can't be undone.`)) return;
             const res = await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
             if (res.ok) window.location.href = "/sites";
           }}><Icon name="trash" size={14} />Delete website</Button>
-        </Card>
+        </Card>}
       </div>
+    </fieldset>
+    </>
+  );
+}
+
+export function ReadOnly() {
+  return (
+    <div className="mb-6 flex items-center gap-3 rounded-xl border border-line bg-panel-2 px-4 py-3 text-[13px] text-muted">
+      <Icon name="shield" size={16} className="text-faint" />You have view-only access to this website. Ask the workspace owner for editor access to make changes.
     </div>
   );
 }

@@ -2,10 +2,11 @@
 // Site dashboard shell: range picker, tab routing, and the Overview + Sources tabs.
 import Link from "next/link";
 import { useState } from "react";
-import AppShell, { type NavId } from "./AppShell";
+import AppShell, { type Account, type NavId } from "./AppShell";
+import { PLANS, RANGE_DAYS } from "@/lib/plans";
 import { AreaChart, type SeriesPoint } from "./Chart";
 import { Icon } from "./icons";
-import { Badge, BarList, Card, Delta, Empty, Loading, PageHeader, Tabs, fmt } from "./ui";
+import { Badge, BarList, Card, Delta, Empty, Loading, PageHeader, Tabs, Upsell, fmt } from "./ui";
 import { useReport } from "./useReport";
 import { PagesTab, SectionsTab, SettingsTab, VisitorsTab } from "./DashboardTabs";
 
@@ -25,20 +26,24 @@ const TABS: Record<Tab, { title: string; subtitle: string }> = {
 };
 const RANGES = [{ id: "24h", label: "24h" }, { id: "7d", label: "7d" }, { id: "30d", label: "30d" }, { id: "90d", label: "90d" }];
 
-export default function Dashboard({ email, site, initialTab }: { email: string; site: SiteProps; initialTab?: string }) {
+export default function Dashboard({ email, site, initialTab, account, role }: { email: string; site: SiteProps; initialTab?: string; account: Account; role: string }) {
   const [tab, setTab] = useState<Tab>(initialTab && initialTab in TABS ? (initialTab as Tab) : "overview");
   const [range, setRange] = useState("30d");
+  const plan = PLANS[account.plan];
+  // Ranges beyond the plan's history show a lock and lead to the upgrade page.
+  const ranges = RANGES.map(r => ({ ...r, label: RANGE_DAYS[r.id] > plan.limits.historyDays ? `${r.label} 🔒` : r.label }));
+  const pickRange = (id: string) => (RANGE_DAYS[id] > plan.limits.historyDays ? window.location.assign("/billing") : setRange(id));
   const go = (t: Tab) => { setTab(t); history.replaceState(null, "", `?tab=${t}`); window.scrollTo({ top: 0 }); };
 
   return (
-    <AppShell email={email} site={site} active={tab} onNav={(id: NavId) => go(id as Tab)}>
+    <AppShell email={email} site={site} active={tab} account={account} onNav={(id: NavId) => go(id as Tab)}>
       <PageHeader title={TABS[tab].title} subtitle={TABS[tab].subtitle} actions={tab !== "settings" && (
         <>
           <a href={`/demo/${site.id}`} target="_blank" rel="noreferrer"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium text-muted transition hover:bg-panel-2 hover:text-ink">
             <Icon name="external" size={14} />Demo site
           </a>
-          <Tabs tabs={RANGES} value={range} onChange={setRange} />
+          <Tabs tabs={ranges} value={range} onChange={pickRange} />
         </>
       )} />
       {!site.installed_at && (
@@ -50,12 +55,12 @@ export default function Dashboard({ email, site, initialTab }: { email: string; 
           </div>
         </div>
       )}
-      {tab === "overview" && <Overview siteId={site.id} range={range} go={go} />}
+      {tab === "overview" && <Overview siteId={site.id} range={range} go={go} converters={plan.can.converters} />}
       {tab === "sources" && <Sources siteId={site.id} range={range} />}
       {tab === "pages" && <PagesTab siteId={site.id} range={range} />}
       {tab === "sections" && <SectionsTab siteId={site.id} range={range} />}
       {tab === "visitors" && <VisitorsTab siteId={site.id} range={range} />}
-      {tab === "settings" && <SettingsTab site={site} />}
+      {tab === "settings" && <SettingsTab site={site} role={role} />}
     </AppShell>
   );
 }
@@ -75,9 +80,9 @@ type Metric = "visitors" | "visits" | "pageviews" | "conversions";
 const delta = (a: number | null, b: number | null) => (a === null || b === null || !b ? null : Math.round(((a - b) / b) * 100));
 const CHANNEL_LABEL: Record<string, string> = { direct: "Direct", organic: "Organic search", social: "Social", ai: "AI assistants", referral: "Referral", paid: "Paid", email: "Email", campaign: "Campaign", affiliate: "Affiliate" };
 
-function Overview({ siteId, range, go }: { siteId: string; range: string; go: (t: Tab) => void }) {
+function Overview({ siteId, range, go, converters }: { siteId: string; range: string; go: (t: Tab) => void; converters: boolean }) {
   const { data, error } = useReport<OverviewData>(siteId, "overview", { range });
-  const ins = useReport<{ insights: InsightT[] }>(siteId, "insights", { range });
+  const ins = useReport<{ insights: InsightT[]; hidden: number }>(siteId, "insights", { range });
   const src = useReport<{ sources: Row[]; channels: Row[] }>(siteId, "sources", { range });
   const pg = useReport<{ pages: (Record<string, unknown> & { path: string })[] }>(siteId, "pages", { range });
   const [metric, setMetric] = useState<Metric>("visitors");
@@ -93,7 +98,7 @@ function Overview({ siteId, range, go }: { siteId: string; range: string; go: (t
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-3">
-        <section className="overflow-hidden rounded-xl border border-line bg-panel shadow-card xl:col-span-2">
+        <section className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-card xl:col-span-2">
           <div className="grid grid-cols-2 border-b border-line md:grid-cols-4">
             {!data ? Array.from({ length: 4 }, (_, i) => <div key={i} className="h-21 animate-pulse border-line bg-panel-2/50 md:border-r" />) : main.map((m, i) => (
               <button key={m.id} onClick={() => setMetric(m.id)}
@@ -134,6 +139,13 @@ function Overview({ siteId, range, go }: { siteId: string; range: string; go: (t
                     {i.tab && <Icon name="arrowRight" size={14} className="mt-0.5 text-faint transition group-hover:translate-x-0.5 group-hover:text-ink" />}
                   </button>
                 ))}
+                {ins.data.hidden > 0 && (
+                  <a href="/billing" className="flex items-center gap-3 px-5 py-3.5 text-[13px] transition hover:bg-panel-2/60">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent-soft text-accent"><Icon name="plus" size={11} strokeWidth={2.5} /></span>
+                    <span className="flex-1"><b>{ins.data.hidden} more insight{ins.data.hidden === 1 ? "" : "s"}</b> <span className="text-muted">on the Pro plan</span></span>
+                    <Icon name="arrowRight" size={14} className="text-faint" />
+                  </a>
+                )}
               </div>
             )}
           </div>
@@ -142,17 +154,17 @@ function Overview({ siteId, range, go }: { siteId: string; range: string; go: (t
 
       <div className="grid items-start gap-6 xl:grid-cols-2">
         <QualityCard k={k} p={p} />
-        <ConvertersCard data={data?.converters} go={go} />
+        <ConvertersCard data={data?.converters} go={go} locked={!converters} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 2xl:grid-cols-3">
         <Card title="Top sources" action={<LinkBtn onClick={() => go("sources")}>All sources</LinkBtn>}>
           {!src.data ? <Loading /> : <BarList rows={src.data.sources.slice(0, 8).map(r => ({ key: r.key, value: Number(r.visits), cells: [fmt.n(r.visits), fmt.rate(r.conversions, r.visits)] }))} columns={["Visits", "Conv."]} />}
         </Card>
         <Card title="Top pages" action={<LinkBtn onClick={() => go("pages")}>All pages</LinkBtn>}>
           {!pg.data ? <Loading /> : <BarList rows={pg.data.pages.slice(0, 8).map(r => ({ key: r.path, value: Number(r.views), cells: [fmt.n(r.views), fmt.ms(r.avg_time_ms)] }))} columns={["Views", "Time"]} />}
         </Card>
-        <Card title="Channels" action={<LinkBtn onClick={() => go("sources")}>Details</LinkBtn>} className="lg:col-span-2 2xl:col-span-1">
+        <Card title="Channels" action={<LinkBtn onClick={() => go("sources")}>Details</LinkBtn>} className="md:col-span-2 2xl:col-span-1">
           {!src.data ? <Loading /> : <BarList rows={src.data.channels.slice(0, 8).map(r => ({ key: CHANNEL_LABEL[r.key] ?? r.key, value: Number(r.visits), cells: [fmt.n(r.visits), fmt.rate(r.conversions, r.visits)] }))} columns={["Visits", "Conv."]} />}
         </Card>
       </div>
@@ -196,7 +208,10 @@ function QualityCard({ k, p }: { k?: Kpis; p?: Kpis }) {
                   <div className="text-[12px] leading-snug text-muted">{row.explain}</div>
                   <div className="mt-0.5 text-[11.5px] text-faint">{row.typical}</div>
                 </div>
-                <div className="tabular text-right text-[15px] font-semibold">{v === null ? "—" : row.show(v)}</div>
+                <div className="text-right">
+                  <div className="tabular text-[15px] font-semibold">{v === null ? "—" : row.show(v)}</div>
+                  {vd && <div className="mt-1 sm:hidden"><Badge tone={vd.tone === "neutral" ? "neutral" : vd.tone}>{vd.label}</Badge></div>}
+                </div>
                 <div className="hidden justify-end sm:flex"><Delta value={delta(v, prev)} invert={row.lowerIsBetter} /></div>
                 <div className="hidden justify-end sm:flex">
                   {vd && <Badge tone={vd.tone === "neutral" ? "neutral" : vd.tone}>{vd.label}</Badge>}
@@ -213,7 +228,7 @@ function QualityCard({ k, p }: { k?: Kpis; p?: Kpis }) {
 
 // ── What converters do differently ──────────────────────────────────────────
 
-function ConvertersCard({ data, go }: { data?: { converted: Side | null; others: Side | null }; go: (t: Tab) => void }) {
+function ConvertersCard({ data, go, locked }: { data?: { converted: Side | null; others: Side | null } | null; go: (t: Tab) => void; locked: boolean }) {
   const c = data?.converted, o = data?.others;
   const times = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 10) / 10 : null);
   const pagesX = c && o ? times(c.pages, o.pages) : null;
@@ -231,7 +246,9 @@ function ConvertersCard({ data, go }: { data?: { converted: Side | null; others:
   return (
     <Card title={<span className="flex items-center gap-2"><Icon name="target" size={15} className="text-accent" />What converters do differently</span>}
       subtitle="Visits that reached a goal, compared with the rest" flush>
-      {!data ? <div className="p-5"><Loading rows={6} /></div> : !c ? (
+      {locked ? (
+        <Upsell title="See what your buyers do differently">Compare visits that converted with everyone else: pages, time, scroll depth, clicks and where they came from.</Upsell>
+      ) : !data ? <div className="p-5"><Loading rows={6} /></div> : !c ? (
         <Empty>
           <span>No conversions in this period yet. Check that your goals match how people sign up or buy in{" "}
             <button className="font-medium text-accent hover:underline" onClick={() => go("settings")}>Goals &amp; settings</button>.</span>
@@ -292,7 +309,7 @@ function Sources({ siteId, range }: { siteId: string; range: string }) {
     ["Operating systems", d => <BarList rows={simple(d.oses)} columns={["Visits", "Conv."]} />],
   ];
   return (
-    <div className="grid gap-6 lg:grid-cols-2 2xl:grid-cols-3">
+    <div className="grid gap-6 md:grid-cols-2 2xl:grid-cols-3">
       {cards.map(([title, body]) => <Card key={title} title={title}>{data ? body(data) : <Loading />}</Card>)}
     </div>
   );

@@ -8,7 +8,7 @@ import { zip } from "@/lib/zip";
 export const runtime = "nodejs";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requireSite((await params).id);
+  const r = await requireSite((await params).id, "editor");
   if (r instanceof NextResponse) return r;
   const { site } = r;
   const src = `${scriptOrigin(site, appOrigin(req))}/t.js`;

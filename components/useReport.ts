@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 
-/** Fetches one stats report; re-fetches when any param changes. */
+/** Fetches one stats report; re-fetches when any param changes. `upgrade` is set when the plan doesn't include it. */
 export function useReport<T>(siteId: string, report: string, params: Record<string, string | undefined>, enabled = true) {
-  const [state, setState] = useState<{ key: string; data: T | null; error: string }>({ key: "", data: null, error: "" });
+  const [state, setState] = useState<{ key: string; data: T | null; error: string; upgrade: boolean }>({ key: "", data: null, error: "", upgrade: false });
   const qs = new URLSearchParams({ report, ...Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined)) as Record<string, string> }).toString();
   useEffect(() => {
     if (!enabled) return;
@@ -11,12 +11,12 @@ export function useReport<T>(siteId: string, report: string, params: Record<stri
     fetch(`/api/sites/${siteId}/stats?${qs}`)
       .then(async r => {
         const d = await r.json();
-        if (alive) setState({ key: qs, data: r.ok ? d : null, error: r.ok ? "" : d.error ?? "Failed to load" });
+        if (alive) setState({ key: qs, data: r.ok ? d : null, error: r.ok ? "" : d.error ?? "Failed to load", upgrade: r.status === 402 });
       })
-      .catch(e => alive && setState({ key: qs, data: null, error: String(e) }));
+      .catch(e => alive && setState({ key: qs, data: null, error: String(e), upgrade: false }));
     return () => { alive = false; };
   }, [siteId, qs, enabled]);
   // Results for an older query aren't shown while the new one loads.
   const fresh = state.key === qs;
-  return { data: fresh ? state.data : null, error: fresh ? state.error : "", loading: !fresh };
+  return { data: fresh ? state.data : null, error: fresh ? state.error : "", upgrade: fresh && state.upgrade, loading: !fresh };
 }

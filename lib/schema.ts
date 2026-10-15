@@ -19,6 +19,36 @@ create table if not exists users (
   pass_hash   text not null,
   created_at  timestamptz not null default now()
 );
+-- Plan (free | pro | premium) and the Stripe ids behind it; see lib/plans.ts and lib/billing.ts.
+alter table users add column if not exists plan text not null default 'free';
+alter table users add column if not exists billing jsonb not null default '{}'::jsonb;
+
+-- Google / Microsoft sign-in: one row per external account linked to a user.
+create table if not exists user_identities (
+  provider    text not null,                   -- google | microsoft
+  subject     text not null,                   -- the provider's stable user id
+  user_id     text not null references users(id) on delete cascade,
+  email       text,
+  created_at  timestamptz not null default now(),
+  primary key (provider, subject)
+);
+
+-- Teams: each owner's account is a workspace; members see all of its sites.
+-- A row starts as an invite (token_hash set, user_id null) and becomes a
+-- membership when accepted. Roles: admin | editor | viewer (the owner is implicit).
+create table if not exists team_members (
+  id          text primary key,
+  owner_id    text not null references users(id) on delete cascade,
+  user_id     text references users(id) on delete cascade,
+  email       text not null,
+  role        text not null default 'viewer',
+  token_hash  text,
+  invited_by  text,
+  created_at  timestamptz not null default now(),
+  accepted_at timestamptz
+);
+create unique index if not exists team_members_owner_email on team_members (owner_id, email);
+create index if not exists team_members_user_idx on team_members (user_id);
 
 create table if not exists auth_sessions (
   token_hash  text primary key,
@@ -150,4 +180,6 @@ alter table pageviews      enable row level security;
 alter table section_views  enable row level security;
 alter table clicks         enable row level security;
 alter table custom_events  enable row level security;
+alter table user_identities enable row level security;
+alter table team_members   enable row level security;
 `;

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
 import { Icon, Logo, type IconName } from "@/components/icons";
+import Pricing from "@/components/Pricing";
 
 const FEATURES: { icon: IconName; title: string; body: string }[] = [
   { icon: "sections", title: "Section-level analytics", body: "Every block on every page is detected automatically. See how far people read and how long each section holds them." },
@@ -41,6 +42,7 @@ export default async function Home() {
             <a href="#features" className="hover:text-ink">Features</a>
             <a href="#compare" className="hover:text-ink">Compare</a>
             <a href="#setup" className="hover:text-ink">Setup</a>
+            <a href="#pricing" className="hover:text-ink">Pricing</a>
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <Link href="/login" className="rounded-lg px-3 py-2 text-[13.5px] font-medium text-muted hover:text-ink">Log in</Link>
@@ -179,7 +181,18 @@ export default async function Home() {
           </div>
         </section>
 
-        <section className="border-t border-line">
+        <section id="pricing" className="border-t border-line">
+          <div className="mx-auto max-w-6xl px-4 py-24 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-2xl text-center">
+              <div className="text-[13px] font-semibold text-accent">Pricing</div>
+              <h2 className="mt-2 text-[34px] font-semibold leading-tight tracking-tight">Start free. Upgrade when it pays for itself.</h2>
+              <p className="mt-4 text-[15.5px] leading-relaxed text-muted">No credit card to start. Every plan includes automatic setup and cookie-free tracking.</p>
+            </div>
+            <div className="mt-12"><Pricing /></div>
+          </div>
+        </section>
+
+        <section className="border-t border-line bg-panel">
           <div className="mx-auto max-w-7xl px-4 py-24 text-center sm:px-6 lg:px-8">
             <h2 className="mx-auto max-w-2xl text-[34px] font-semibold leading-tight tracking-tight">Find out what your website is really doing.</h2>
             <Link href="/login?mode=signup" className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-[14px] font-medium text-on-accent shadow-card hover:bg-accent-hover">

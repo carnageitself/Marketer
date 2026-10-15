@@ -3,10 +3,11 @@
 // status that updates on its own, so the user never has to press "verify".
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import AppShell from "./AppShell";
+import AppShell, { type Account } from "./AppShell";
 import { Icon, type IconName } from "./icons";
 import { Badge, Button, Card, Code, CopyButton, PageHeader, field, fmt } from "./ui";
 import { GUIDES, guideFor } from "./install-guides";
+import { ReadOnly } from "./DashboardTabs";
 
 interface ProviderSpec { label: string; fields: { key: string; label: string; secret?: boolean; optional?: boolean }[]; help: string; url: string }
 interface Rec { type: string; name: string; fqdn: string; value: string; purpose: string; live?: boolean; found?: string[] }
@@ -24,7 +25,7 @@ interface SiteT {
 interface Info { site: SiteT; snippet: string; origin: string; records: Rec[]; cnameAvailable: boolean; providerFields: Record<string, ProviderSpec>; providerLink: string | null; signIn: { cloudflare: boolean } }
 interface Check { records: Rec[]; installed: boolean; scriptOnHomepage: boolean | null; visits: number; lastSeen: string | null; site: SiteT }
 
-export default function Setup({ initial, email }: { initial: Info; email: string }) {
+export default function Setup({ initial, email, account, role }: { initial: Info; email: string; account: Account; role: string }) {
   const siteId = initial.site.id;
   const [info, setInfo] = useState<Info>(initial);
   const [check, setCheck] = useState<Check | null>(null);
@@ -86,10 +87,11 @@ export default function Setup({ initial, email }: { initial: Info; email: string
   const connectHref = (via: string, intent: string) => `/api/connect/start?site=${site.id}&via=${via}&intent=${intent}`;
 
   return (
-    <AppShell email={email} site={site} active="setup">
+    <AppShell email={email} site={site} active="setup" account={account}>
       <PageHeader title={`Set up ${site.domain}`} subtitle="Everything on this page updates on its own. There's no verify button to press."
         actions={<Link href={`/sites/${site.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-[13px] font-medium text-on-accent shadow-card hover:bg-accent-hover">Open dashboard<Icon name="arrowRight" size={14} /></Link>} />
 
+      {role === "viewer" && <ReadOnly />}
       {notice && (
         <div className={`mb-6 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px] ${notice.ok ? "border-good/25 bg-good-soft" : "border-bad/25 bg-bad-soft"}`}>
           <Icon name={notice.ok ? "check" : "close"} size={16} className={`mt-0.5 ${notice.ok ? "text-good" : "text-bad"}`} />
@@ -99,7 +101,7 @@ export default function Setup({ initial, email }: { initial: Info; email: string
       )}
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           {/* 1 — scan */}
           <Step n={1} done={steps[0].done} title="What we found" subtitle={scan.scannedAt ? `Scanned ${fmt.ago(scan.scannedAt)}` : undefined} action={
             <Button variant="ghost" size="sm" disabled={scanning} onClick={async () => {
@@ -121,7 +123,7 @@ export default function Setup({ initial, email }: { initial: Info; email: string
 
           {/* 2 — install */}
           <Step n={2} done={installed} title="Add the tracker" action={<InstallStatus check={check} />}>
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               {scan.cloudflareProxied && (info.signIn.cloudflare || site.dns.worker
                 ? <CloudflareWorker site={site} spec={info.providerFields.cloudflare} onDone={load}
                     signInHref={info.signIn.cloudflare ? (intent: string) => connectHref("cloudflare", intent) : undefined} />
@@ -206,7 +208,7 @@ export default function Setup({ initial, email }: { initial: Info; email: string
           </Step>
         </div>
 
-        <aside className="space-y-6 xl:sticky xl:top-8">
+        <aside className="min-w-0 space-y-6 xl:sticky xl:top-8">
           <Card title="Setup progress" subtitle={`${doneCount} of ${steps.length} done`}>
             <div className="mb-4 h-1.5 overflow-hidden rounded-full bg-panel-2">
               <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${(doneCount / steps.length) * 100}%` }} />

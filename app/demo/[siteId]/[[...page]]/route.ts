@@ -8,7 +8,7 @@
 //   /features                 → reached by an SPA-style pushState
 // Section ids and paths match scripts/simulate.mjs, so simulated and real
 // visits land in the same sections.
-import { appOrigin, getSite } from "@/lib/sites";
+import { appOrigin, siteAccess } from "@/lib/sites";
 import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -115,7 +115,7 @@ table.cmp{width:100%;border-collapse:collapse;margin-top:48px;font-size:15px;bac
 .pw-demo b{color:#fff}.pw-demo a{background:#fff;color:#0f172a;text-decoration:none;font-weight:600;padding:6px 12px;border-radius:99px}
 @media (max-width:900px){
   header nav{display:none}.grid3,.grid4,.plans,.stats{grid-template-columns:1fr}.split{grid-template-columns:1fr;gap:40px}
-  footer .cols{grid-template-columns:1fr 1fr}.app .body{grid-template-columns:1fr}.app .side,.app .list{display:none}
+  footer .cols{grid-template-columns:repeat(2,minmax(0,1fr))}footer .cols>div:first-child,footer .cols>div:last-child{grid-column:1/-1}.cmp th,.cmp td{padding:12px 10px;font-size:14px}.plan{padding:26px}.app .body{grid-template-columns:1fr}.app .side,.app .list{display:none}
   .pad{padding:80px 0}.cta{padding:56px 24px}.pw-demo span{display:none}
 }`;
 
@@ -190,13 +190,13 @@ function page(base: string, parts: string[]): { title: string; body: string } {
 </div></div>
 <div id="compare" class="pad soft"><div class="c">
   <div class="center"><h2>Compare plans</h2></div>
-  <table class="cmp"><tr><th>Feature</th><th>Free</th><th>Pro</th><th>Team</th></tr>
+  <div style="overflow-x:auto"><table class="cmp"><tr><th>Feature</th><th>Free</th><th>Pro</th><th>Team</th></tr>
     <tr><td>Notes</td><td>Unlimited</td><td>Unlimited</td><td>Unlimited</td></tr>
     <tr><td>Devices</td><td>2</td><td>Unlimited</td><td>Unlimited</td></tr>
     <tr><td>Version history</td><td>7 days</td><td>Forever</td><td>Forever</td></tr>
     <tr><td>AI search</td><td>&mdash;</td><td>&check;</td><td>&check;</td></tr>
     <tr><td>Shared workspaces</td><td>&mdash;</td><td>&mdash;</td><td>&check;</td></tr>
-    <tr><td>SSO &amp; audit log</td><td>&mdash;</td><td>&mdash;</td><td>&check;</td></tr></table>
+    <tr><td>SSO &amp; audit log</td><td>&mdash;</td><td>&mdash;</td><td>&check;</td></tr></table></div>
 </div></div>
 <div id="faq" class="pad"><div class="c">
   <div class="center"><h2>Frequently asked questions</h2></div>
@@ -320,8 +320,8 @@ function page(base: string, parts: string[]): { title: string; body: string } {
 export async function GET(req: Request, { params }: { params: Promise<{ siteId: string; page?: string[] }> }) {
   const { siteId, page: parts } = await params;
   const user = await currentUser();
-  const site = await getSite(siteId);
-  if (!site || !user || site.user_id !== user.id) return new Response("Demo not found. Open it from your dashboard while signed in.", { status: 404 });
+  const site = user ? (await siteAccess(siteId, user))?.site : null;
+  if (!site) return new Response("Demo not found. Open it from your dashboard while signed in.", { status: 404 });
   const origin = appOrigin(req);
   const base = `/demo/${siteId}`;
   const p = page(base, parts ?? []);

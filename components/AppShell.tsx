@@ -4,8 +4,11 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { Icon, Logo, type IconName } from "./icons";
+import { PLANS, fmtViews, type PlanId } from "@/lib/plans";
 
-export type NavId = "sites" | "overview" | "sources" | "pages" | "sections" | "visitors" | "settings" | "setup";
+export interface Account { plan: PlanId; usage: { pageviews: number; sites: number }; payments: boolean }
+
+export type NavId = "billing" | "team" | "sites" | "overview" | "sources" | "pages" | "sections" | "visitors" | "settings" | "setup";
 
 const SITE_NAV: { id: NavId; label: string; icon: IconName }[] = [
   { id: "overview", label: "Overview", icon: "overview" },
@@ -15,8 +18,9 @@ const SITE_NAV: { id: NavId; label: string; icon: IconName }[] = [
   { id: "visitors", label: "Visitors", icon: "visitors" },
 ];
 
-export default function AppShell({ email, site, active, onNav, children }: {
+export default function AppShell({ email, site, active, onNav, account, children }: {
   email: string;
+  account?: Account;
   site?: { id: string; domain: string; installed_at?: string | null };
   active: NavId;
   /** On the dashboard, switches tabs in place instead of navigating. */
@@ -27,7 +31,7 @@ export default function AppShell({ email, site, active, onNav, children }: {
   const item = (id: NavId, label: string, icon: IconName, href: string) => (
     <Link key={id} href={href} onClick={e => {
       setOpen(false);
-      if (onNav && id !== "setup" && id !== "sites") { e.preventDefault(); onNav(id); }
+      if (onNav && !["setup", "sites", "billing", "team"].includes(id)) { e.preventDefault(); onNav(id); }
     }}
       className={`flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition ${active === id ? "bg-panel-2 text-ink" : "text-muted hover:bg-panel-2/60 hover:text-ink"}`}>
       <Icon name={icon} size={16} className={active === id ? "text-accent" : ""} />{label}
@@ -41,7 +45,11 @@ export default function AppShell({ email, site, active, onNav, children }: {
         <span className="text-[15px] font-semibold tracking-tight">Pagewise</span>
       </Link>
 
-      {item("sites", "All websites", "sites", "/sites")}
+      <div className="space-y-0.5">
+        {item("sites", "All websites", "sites", "/sites")}
+        {item("team", "Team", "visitors", "/team")}
+        {item("billing", "Plan & billing", "target", "/billing")}
+      </div>
 
       {site && (
         <div className="mt-5">
@@ -67,7 +75,9 @@ export default function AppShell({ email, site, active, onNav, children }: {
         </div>
       )}
 
-      <div className="mt-auto border-t border-line pt-3">
+      {account && <UsageMeter account={account} />}
+
+      <div className={`${account ? "" : "mt-auto "}border-t border-line pt-3`}>
         <div className="flex items-center gap-2.5 px-2.5 py-1.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-panel-3 text-[12px] font-semibold uppercase">{email[0]}</span>
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted" title={email}>{email}</span>
@@ -100,7 +110,28 @@ export default function AppShell({ email, site, active, onNav, children }: {
         </div>
       )}
 
-      <main className="px-4 py-6 sm:px-6 lg:px-10 lg:py-8">{children}</main>
+      <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">{children}</main>
+    </div>
+  );
+}
+
+function UsageMeter({ account }: { account: Account }) {
+  const plan = PLANS[account.plan];
+  const used = account.usage.pageviews, limit = plan.limits.pageviews;
+  const pct = Math.min(100, (used / limit) * 100);
+  const over = used > limit;
+  return (
+    <div className="mt-auto mb-3 rounded-lg border border-line bg-panel p-3 shadow-card">
+      <div className="flex items-center justify-between text-[12px]">
+        <span className="font-semibold">{plan.name} plan</span>
+        {account.plan !== "premium" && <Link href="/billing" className="font-medium text-accent hover:underline">Upgrade</Link>}
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-panel-2">
+        <div className={`h-full rounded-full ${over ? "bg-bad" : pct > 80 ? "bg-warn" : "bg-accent"}`} style={{ width: `${pct}%` }} />
+      </div>
+      <div className={`mt-1.5 text-[11.5px] ${over ? "font-medium text-bad" : "text-muted"}`}>
+        {used.toLocaleString("en-US")} of {fmtViews(limit)} page views this month
+      </div>
     </div>
   );
 }

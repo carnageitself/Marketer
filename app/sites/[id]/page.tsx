@@ -1,7 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import { currentUser } from "@/lib/auth";
-import { getSite } from "@/lib/sites";
+import { siteAccess } from "@/lib/sites";
 import Dashboard from "@/components/Dashboard";
+import { accountOf } from "@/lib/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +10,8 @@ export default async function SiteDashboard({ params, searchParams }: { params: 
   const user = await currentUser();
   if (!user) redirect("/login");
   const { id } = await params;
-  const site = await getSite(id);
-  if (!site || site.user_id !== user.id) notFound();
-  return <Dashboard email={user.email} site={JSON.parse(JSON.stringify(site))} initialTab={(await searchParams).tab} />;
+  const access = await siteAccess(id, user);
+  if (!access) notFound();
+  const { site, role } = access;
+  return <Dashboard email={user.email} role={role} account={await accountOf(user)} site={JSON.parse(JSON.stringify(site))} initialTab={(await searchParams).tab} />;
 }

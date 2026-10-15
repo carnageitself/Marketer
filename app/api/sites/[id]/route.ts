@@ -13,7 +13,7 @@ export async function GET(req: Request, { params }: Ctx) {
 }
 
 export async function PATCH(req: Request, { params }: Ctx) {
-  const r = await requireSite((await params).id);
+  const r = await requireSite((await params).id, "editor");
   if (r instanceof NextResponse) return r;
   const body = await req.json().catch(() => ({})) as { goals?: Goal[]; settings?: { persistentIds?: boolean } };
   const fields: Parameters<typeof patchSite>[1] = {};
@@ -35,7 +35,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
 }
 
 export async function DELETE(_req: Request, { params }: Ctx) {
-  const r = await requireSite((await params).id);
+  const r = await requireSite((await params).id, "admin");
   if (r instanceof NextResponse) return r;
   await q("delete from sites where id = $1", [r.site.id]);
   return NextResponse.json({ ok: true });

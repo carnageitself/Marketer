@@ -1,32 +1,33 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import AppShell from "./AppShell";
+import AppShell, { type Account } from "./AppShell";
 import { Icon } from "./icons";
 import { Badge, Button, PageHeader, field, fmt } from "./ui";
 
 interface SiteRow {
-  id: string; domain: string; installed_at: string | null; verified_at: string | null; visitors_24h: number; live: number;
+  id: string; domain: string; installed_at: string | null; verified_at: string | null; visitors_24h: number; live: number; role?: string; owner_email?: string;
   scan: { platform?: { name: string } | null; dnsProvider?: { name: string } | null; host?: { name: string } | null };
 }
 
-export default function SitesList({ initial, email }: { initial: SiteRow[]; email: string }) {
+export default function SitesList({ initial, email, account }: { initial: SiteRow[]; email: string; account: Account }) {
   const [sites] = useState(initial);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [upgrade, setUpgrade] = useState(false);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setError("");
     const res = await fetch("/api/sites", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { setError(data.error ?? "Couldn't add that site"); setBusy(false); return; }
+    if (!res.ok) { setError(data.error ?? "Couldn't add that site"); setUpgrade(res.status === 402); setBusy(false); return; }
     window.location.href = `/sites/${data.site.id}/setup`;
   }
 
   return (
-    <AppShell email={email} active="sites">
+    <AppShell email={email} active="sites" account={account}>
       <PageHeader title="Websites" subtitle={sites.length ? `${sites.length} website${sites.length === 1 ? "" : "s"} · last 24 hours` : "Add a website to start measuring it."} />
 
       <form onSubmit={add} className="rounded-xl border border-line bg-panel p-5 shadow-card">
@@ -40,7 +41,7 @@ export default function SitesList({ initial, email }: { initial: SiteRow[]; emai
           </div>
           <Button type="submit" disabled={busy} className="h-10">{busy ? <><Icon name="refresh" size={14} className="animate-spin" />Scanning your domain…</> : <><Icon name="plus" size={14} />Add website</>}</Button>
         </div>
-        {error && <p className="mt-2 text-[13px] text-bad">{error}</p>}
+        {error && <p className="mt-2 text-[13px] text-bad">{error}{upgrade && <> <a href="/billing" className="font-medium text-accent hover:underline">See plans →</a></>}</p>}
       </form>
 
       {!!sites.length && (
@@ -51,7 +52,7 @@ export default function SitesList({ initial, email }: { initial: SiteRow[]; emai
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-[15px] font-semibold uppercase text-accent">{s.domain[0]}</span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14.5px] font-semibold">{s.domain}</div>
-                  <div className="mt-0.5 truncate text-[12px] text-muted">{[s.scan?.platform?.name, s.scan?.host?.name ?? s.scan?.dnsProvider?.name].filter(Boolean).join(" · ") || "Not scanned"}</div>
+                  <div className="mt-0.5 truncate text-[12px] text-muted">{s.role && s.role !== "owner" ? <>Shared by {s.owner_email} · <span className="capitalize">{s.role}</span></> : [s.scan?.platform?.name, s.scan?.host?.name ?? s.scan?.dnsProvider?.name].filter(Boolean).join(" · ") || "Not scanned"}</div>
                 </div>
                 {s.installed_at ? <Badge tone="good" dot={!!s.live}>{s.live ? `${s.live} live` : "Active"}</Badge> : <Badge tone="warn">Not installed</Badge>}
               </div>

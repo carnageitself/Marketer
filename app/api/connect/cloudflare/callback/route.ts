@@ -15,8 +15,8 @@ export async function GET(req: NextRequest) {
   const flow = readFlow(req, p.get("state"));
   if (!flow || flow.via !== "cloudflare" || !flow.verifier) return finish(origin, null, false, "That sign-in link expired. Please try again.");
   if (p.get("error")) return finish(origin, flow.siteId, false, p.get("error") === "access_denied" ? "Cloudflare access wasn't granted, so nothing was changed." : p.get("error_description") ?? p.get("error")!);
-  const r = await requireSite(flow.siteId);
-  if (r instanceof NextResponse) return finish(origin, null, false, "Sign in to Pagewise first");
+  const r = await requireSite(flow.siteId, "editor");
+  if (r instanceof NextResponse) return finish(origin, null, false, r.status === 403 ? "You need editor access to change this website's setup." : "Sign in to Pagewise first");
   let site = r.site;
 
   let token: string | null = null;

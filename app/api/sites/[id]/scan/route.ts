@@ -6,7 +6,7 @@ import { patchSite, requireSite } from "@/lib/sites";
 export const runtime = "nodejs";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const r = await requireSite((await params).id);
+  const r = await requireSite((await params).id, "editor");
   if (r instanceof NextResponse) return r;
   const scan = await scanDomain(r.site.domain, r.site.id);
   return NextResponse.json({ site: await patchSite(r.site.id, { scan }) });

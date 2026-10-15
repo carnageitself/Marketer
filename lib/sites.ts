@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { currentUser, newId, type SessionUser } from "./auth";
 import { one, q } from "./db";
+import { atLeast, roleIn, type Role } from "./team";
 
 export type GoalType = "app_link" | "click_text" | "path" | "event";
 export interface Goal { id: string; type: GoalType; pattern: string; label: string }
@@ -62,12 +63,19 @@ export function normaliseDomain(input: string): string | null {
   }
 }
 
+/** The user's own websites, then those of every workspace they've joined. */
 export async function listSites(userId: string) {
-  return q<Site & { visitors_24h: number; live: number }>(
+  return q<Site & { visitors_24h: number; live: number; role: Role; owner_email: string }>(
     `select s.*,
+       case when s.user_id = $1 then 'owner' else m.role end as role,
+       o.email as owner_email,
        (select count(distinct v.visitor_key)::int from visits v where v.site_id = s.id and v.started_at > now() - interval '24 hours') as visitors_24h,
        (select count(*)::int from visits v where v.site_id = s.id and v.last_seen_at > now() - interval '5 minutes') as live
-     from sites s where s.user_id = $1 order by s.created_at desc`,
+     from sites s
+     join users o on o.id = s.user_id
+     left join team_members m on m.owner_id = s.user_id and m.user_id = $1 and m.accepted_at is not null
+     where s.user_id = $1 or m.id is not null
+     order by (s.user_id = $1) desc, s.created_at desc`,
     [userId],
   );
 }
@@ -102,13 +110,30 @@ export function withLog(dns: DnsState, text: string, ok = true): DnsState {
   return { ...dns, log: [...(dns.log ?? []), { at: new Date().toISOString(), text, ok }].slice(-30) };
 }
 
-/** For route handlers: the signed-in user's site, or a ready-made error response. */
-export async function requireSite(id: string): Promise<{ user: SessionUser; site: Site } | NextResponse> {
+export interface SiteAccess { site: Site; role: Role; ownerPlan: string }
+
+/** A site the user can open (their own or a workspace they joined), with their role and the owner's plan. */
+export async function siteAccess(id: string, user: SessionUser): Promise<SiteAccess | null> {
+  const row = await one<Site & { owner_plan: string }>(
+    "select s.*, u.plan as owner_plan from sites s join users u on u.id = s.user_id where s.id = $1", [id]);
+  if (!row) return null;
+  const role = await roleIn(user.id, row.user_id);
+  if (!role) return null;
+  const { owner_plan, ...site } = row;
+  return { site, role, ownerPlan: owner_plan };
+}
+
+/**
+ * For route handlers: the site if the signed-in user may do `need` on it,
+ * otherwise a ready-made 401 / 404 / 403 response.
+ */
+export async function requireSite(id: string, need: Role = "viewer"): Promise<({ user: SessionUser } & SiteAccess) | NextResponse> {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
-  const site = await getSite(id);
-  if (!site || site.user_id !== user.id) return NextResponse.json({ error: "Site not found" }, { status: 404 });
-  return { user, site };
+  const access = await siteAccess(id, user);
+  if (!access) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+  if (!atLeast(access.role, need)) return NextResponse.json({ error: `You need ${need} access to do that. Ask the workspace owner.` }, { status: 403 });
+  return { user, ...access };
 }
 
 /** Public origin of this app, used in the snippet and DNS targets. */

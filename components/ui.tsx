@@ -32,7 +32,7 @@ export function Card({ title, subtitle, action, children, className = "", flush 
   title?: ReactNode; subtitle?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; flush?: boolean;
 }) {
   return (
-    <section className={`rounded-xl border border-line bg-panel shadow-card ${className}`}>
+    <section className={`min-w-0 rounded-xl border border-line bg-panel shadow-card ${className}`}>
       {(title || action) && (
         <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3.5">
           <div className="min-w-0">
@@ -164,6 +164,20 @@ export function BarList({ rows, columns, empty = "No data yet", onSelect }: {
           {(r.cells ?? [fmt.n(r.value)]).map((c, i) => <span key={i} className={`tabular w-16 text-right text-[13px] ${i ? "text-muted" : "font-medium"}`}>{c}</span>)}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Shown in place of a feature the current plan doesn't include. */
+export function Upsell({ title, children, plan = "Pro" }: { title: string; children: ReactNode; plan?: string }) {
+  return (
+    <div className="flex flex-col items-center px-6 py-10 text-center">
+      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-soft text-accent"><Icon name="sparkle" size={18} /></span>
+      <div className="mt-3 text-[14px] font-semibold">{title}</div>
+      <p className="mt-1 max-w-sm text-[13px] leading-relaxed text-muted">{children}</p>
+      <a href="/billing" className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent shadow-card hover:bg-accent-hover">
+        Upgrade to {plan}<Icon name="arrowRight" size={14} />
+      </a>
     </div>
   );
 }
