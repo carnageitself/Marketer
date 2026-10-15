@@ -74,7 +74,7 @@ export async function createSite(userId: string, domain: string): Promise<Site> 
   const id = newId("pw", 9);
   const token = randomBytes(12).toString("hex");
   const site = await one<Site>(
-    `insert into sites (id, user_id, domain, verify_token, goals) values ($1, $2, $3, $4, $5::jsonb) returning *`,
+    `insert into sites (id, user_id, domain, verify_token, goals) values ($1, $2, $3, $4, $5::text::jsonb) returning *`,
     [id, userId, domain, token, JSON.stringify(DEFAULT_GOALS)],
   );
   return site!;
@@ -89,7 +89,7 @@ export async function patchSite(id: string, fields: Partial<Pick<Site, "scan" | 
   const vals: unknown[] = [id];
   for (const [k, v] of Object.entries(fields)) {
     vals.push(typeof v === "object" && v !== null ? JSON.stringify(v) : v);
-    sets.push(`${k} = $${vals.length}${["scan", "dns", "goals", "settings"].includes(k) ? "::jsonb" : ""}`);
+    sets.push(`${k} = $${vals.length}${["scan", "dns", "goals", "settings"].includes(k) ? "::text::jsonb" : ""}`);
   }
   if (!sets.length) return getSite(id);
   return one<Site>(`update sites set ${sets.join(", ")} where id = $1 returning *`, vals);

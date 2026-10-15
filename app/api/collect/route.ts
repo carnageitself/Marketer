@@ -175,7 +175,7 @@ export async function POST(req: Request) {
     } else if (e.t === "ev" && str(e.name, 100)) {
       const props = e.props && typeof e.props === "object" ? JSON.stringify(e.props).slice(0, 2000) : "{}";
       await q(
-        `insert into custom_events (site_id, visit_id, ts, path, name, props) values ($1,$2,$3,$4,$5,$6::jsonb)`,
+        `insert into custom_events (site_id, visit_id, ts, path, name, props) values ($1,$2,$3,$4,$5,$6::text::jsonb)`,
         [siteId, visitId, ts, path, str(e.name, 100), props.startsWith("{") && props.endsWith("}") ? props : "{}"],
       );
     }

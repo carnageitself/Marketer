@@ -131,6 +131,14 @@ create table if not exists custom_events (
 );
 create index if not exists custom_events_site_idx on custom_events (site_id, ts desc);
 
+-- Repair: postgres.js once double-encoded these columns (a JSON string holding
+-- the object) because values were bound as $n::jsonb. Writes now use
+-- $n::text::jsonb; this unwraps any rows written before that.
+update sites set scan     = (scan #>> '{}')::jsonb     where jsonb_typeof(scan)     = 'string';
+update sites set dns      = (dns #>> '{}')::jsonb      where jsonb_typeof(dns)      = 'string';
+update sites set goals    = (goals #>> '{}')::jsonb    where jsonb_typeof(goals)    = 'string';
+update sites set settings = (settings #>> '{}')::jsonb where jsonb_typeof(settings) = 'string';
+
 -- Row level security with no policies: hosts like Supabase expose the public
 -- schema over a REST API with a public key, and this makes every table
 -- unreachable that way. The app connects as the table owner, which bypasses it.

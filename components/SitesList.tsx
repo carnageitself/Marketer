@@ -1,14 +1,16 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { Badge, Button, Empty, fmt } from "./ui";
+import AppShell from "./AppShell";
+import { Icon } from "./icons";
+import { Badge, Button, PageHeader, field, fmt } from "./ui";
 
 interface SiteRow {
   id: string; domain: string; installed_at: string | null; verified_at: string | null; visitors_24h: number; live: number;
-  scan: { platform?: { name: string } | null; dnsProvider?: { name: string } | null };
+  scan: { platform?: { name: string } | null; dnsProvider?: { name: string } | null; host?: { name: string } | null };
 }
 
-export default function SitesList({ initial }: { initial: SiteRow[] }) {
+export default function SitesList({ initial, email }: { initial: SiteRow[]; email: string }) {
   const [sites] = useState(initial);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -24,40 +26,52 @@ export default function SitesList({ initial }: { initial: SiteRow[] }) {
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="text-xl font-semibold">Your websites</h1>
-      <form onSubmit={add} className="mt-4 flex flex-col gap-2 rounded-xl border border-line bg-panel p-4 sm:flex-row">
-        <input value={url} onChange={e => setUrl(e.target.value)} required placeholder="Paste your website, e.g. example.com"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-panel px-3 py-2.5 text-[14px] outline-none focus:border-accent" />
-        <Button type="submit" disabled={busy} className="py-2.5">{busy ? "Scanning your domain…" : "Add website"}</Button>
-      </form>
-      {error && <p className="mt-2 text-[13px] text-bad">{error}</p>}
-      <p className="mt-2 text-[12px] text-muted">We look up its DNS, hosting and platform automatically, then give you the exact install steps.</p>
+    <AppShell email={email} active="sites">
+      <PageHeader title="Websites" subtitle={sites.length ? `${sites.length} website${sites.length === 1 ? "" : "s"} · last 24 hours` : "Add a website to start measuring it."} />
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {sites.map(s => (
-          <div key={s.id} className="rounded-xl border border-line bg-panel p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-[15px] font-semibold">{s.domain}</div>
-                <div className="mt-0.5 text-[12px] text-muted">{[s.scan?.platform?.name, s.scan?.dnsProvider?.name].filter(Boolean).join(" · ") || "Not scanned"}</div>
-              </div>
-              {s.installed_at ? <Badge tone="good">● Receiving data</Badge> : <Badge tone="bad">Waiting for install</Badge>}
-            </div>
-            <div className="mt-4 flex items-end justify-between">
-              <div>
-                <div className="tabular text-[22px] font-semibold">{fmt.n(s.visitors_24h)}</div>
-                <div className="text-[12px] text-muted">visitors, last 24h{s.live ? ` · ${s.live} live now` : ""}</div>
-              </div>
-              <div className="flex gap-2">
-                <Link href={`/sites/${s.id}/setup`} className="rounded-lg border border-line px-3 py-1.5 text-[12px]">Setup</Link>
-                <Link href={`/sites/${s.id}`} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-on-accent">Dashboard</Link>
-              </div>
-            </div>
+      <form onSubmit={add} className="rounded-xl border border-line bg-panel p-5 shadow-card">
+        <label className="text-[13.5px] font-semibold" htmlFor="site-url">Add a website</label>
+        <p className="mt-0.5 text-[12.5px] text-muted">We look up its DNS, hosting and platform, then give you the exact install steps.</p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Icon name="sources" size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+            <input id="site-url" value={url} onChange={e => setUrl(e.target.value)} required placeholder="example.com"
+              className={`${field} h-10 w-full pl-9 text-[14px]`} />
           </div>
-        ))}
-      </div>
-      {!sites.length && <Empty>No websites yet. Add your first one above.</Empty>}
-    </main>
+          <Button type="submit" disabled={busy} className="h-10">{busy ? <><Icon name="refresh" size={14} className="animate-spin" />Scanning your domain…</> : <><Icon name="plus" size={14} />Add website</>}</Button>
+        </div>
+        {error && <p className="mt-2 text-[13px] text-bad">{error}</p>}
+      </form>
+
+      {!!sites.length && (
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {sites.map(s => (
+            <Link key={s.id} href={`/sites/${s.id}`} className="group flex flex-col rounded-xl border border-line bg-panel p-5 shadow-card transition hover:border-line-strong hover:shadow-pop">
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-[15px] font-semibold uppercase text-accent">{s.domain[0]}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[14.5px] font-semibold">{s.domain}</div>
+                  <div className="mt-0.5 truncate text-[12px] text-muted">{[s.scan?.platform?.name, s.scan?.host?.name ?? s.scan?.dnsProvider?.name].filter(Boolean).join(" · ") || "Not scanned"}</div>
+                </div>
+                {s.installed_at ? <Badge tone="good" dot={!!s.live}>{s.live ? `${s.live} live` : "Active"}</Badge> : <Badge tone="warn">Not installed</Badge>}
+              </div>
+              <div className="mt-6 flex items-end justify-between">
+                <div>
+                  <div className="tabular text-[26px] font-semibold leading-none tracking-tight">{fmt.n(s.visitors_24h)}</div>
+                  <div className="mt-1.5 text-[12px] text-muted">visitors in the last 24h</div>
+                </div>
+                <div className="flex items-center gap-3 text-[12.5px] font-medium">
+                  {!s.installed_at && (
+                    <span role="link" tabIndex={0} className="text-accent hover:underline"
+                      onClick={e => { e.preventDefault(); window.location.href = `/sites/${s.id}/setup`; }}>Finish setup</span>
+                  )}
+                  <span className="inline-flex items-center gap-1 text-muted transition group-hover:text-ink">Dashboard<Icon name="arrowRight" size={13} className="transition group-hover:translate-x-0.5" /></span>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </AppShell>
   );
 }

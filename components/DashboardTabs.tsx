@@ -1,7 +1,8 @@
 "use client";
 // Pages, Sections, Visitors (with visit replay) and Settings tabs.
 import { useState } from "react";
-import { Badge, BarList, Button, Card, Empty, Table, fmt } from "./ui";
+import { Badge, BarList, Button, Card, Empty, Loading, Table, field, fmt } from "./ui";
+import { Icon } from "./icons";
 import { useReport } from "./useReport";
 import type { SiteProps } from "./Dashboard";
 
@@ -13,10 +14,10 @@ const s = (v: unknown) => (v === null || v === undefined ? "" : String(v));
 export function PagesTab({ siteId, range }: { siteId: string; range: string }) {
   const { data, error } = useReport<{ pages: R[]; links: R[]; flow: R[] }>(siteId, "pages", { range });
   const [path, setPath] = useState<string | null>(null);
-  if (error) return <Empty>{error}</Empty>;
-  if (!data) return <Empty>Loading…</Empty>;
+  if (error) return <Card><Empty>{error}</Empty></Card>;
+  if (!data) return <Card><Loading rows={6} /></Card>;
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <Card title="Pages" action={<span className="text-[12px] text-muted">Click a page for scroll depth, clicks and flow</span>}>
         <Table head={["Page", "Views", "Visitors", "Avg. time", "Scroll", "Entrances", "Exits"]}
           rows={data.pages.map(p => [
@@ -25,7 +26,7 @@ export function PagesTab({ siteId, range }: { siteId: string; range: string }) {
           ])} />
       </Card>
       {path && <PageDetail siteId={siteId} range={range} path={path} onClose={() => setPath(null)} />}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-2">
         <Card title="What people click">
           <Table head={["Link / button", "Page", "Clicks"]} rows={data.links.map(l => [
             <span key="l" title={s(l.href)}>{s(l.label) || s(l.href) || "(no label)"} <span className="text-muted">· {s(l.kind)}</span></span>,
@@ -43,26 +44,26 @@ export function PagesTab({ siteId, range }: { siteId: string; range: string }) {
 function PageDetail({ siteId, range, path, onClose }: { siteId: string; range: string; path: string; onClose: () => void }) {
   const { data } = useReport<{ views: number; medianTimeMs: number; scroll: { depth: number; pct: number | null }[]; clicks: R[]; cameFrom: R[]; wentTo: R[] }>(siteId, "page", { range, path });
   return (
-    <Card title={<>Page: <span className="font-mono">{path}</span></>} action={<button className="text-[12px] text-muted" onClick={onClose}>Close ✕</button>}>
-      {!data ? <Empty>Loading…</Empty> : (
-        <div className="grid gap-5 md:grid-cols-3">
+    <Card title={<>Page: <span className="font-mono">{path}</span></>} action={<Button variant="subtle" size="sm" onClick={onClose}><Icon name="close" size={14} />Close</Button>}>
+      {!data ? <Loading /> : (
+        <div className="grid gap-8 lg:grid-cols-3">
           <div>
-            <div className="mb-2 text-[12px] font-medium text-muted">SCROLL DEPTH · median time {fmt.ms(data.medianTimeMs)}</div>
+            <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-faint">SCROLL DEPTH · median time {fmt.ms(data.medianTimeMs)}</div>
             {data.scroll.map(x => (
               <div key={x.depth} className="mb-2">
                 <div className="flex justify-between text-[12px]"><span>Reached {x.depth}%</span><span className="tabular">{fmt.pct(x.pct)}</span></div>
-                <div className="mt-1 h-2 rounded bg-panel-2"><div className="h-2 rounded bg-accent" style={{ width: `${x.pct ?? 0}%` }} /></div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-panel-2"><div className="h-2 rounded-full bg-accent" style={{ width: `${x.pct ?? 0}%` }} /></div>
               </div>
             ))}
           </div>
           <div>
-            <div className="mb-2 text-[12px] font-medium text-muted">CAME FROM</div>
+            <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-faint">CAME FROM</div>
             <BarList rows={data.cameFrom.map(r => ({ key: s(r.path), value: Number(r.n) }))} />
-            <div className="mb-2 mt-4 text-[12px] font-medium text-muted">WENT TO</div>
+            <div className="mb-2 mt-4 text-[11px] font-medium uppercase tracking-wider text-faint">WENT TO</div>
             <BarList rows={data.wentTo.map(r => ({ key: s(r.path), value: Number(r.n) }))} empty="Nobody went further" />
           </div>
           <div>
-            <div className="mb-2 text-[12px] font-medium text-muted">CLICKS ON THIS PAGE</div>
+            <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-faint">CLICKS ON THIS PAGE</div>
             <BarList rows={data.clicks.map(c => ({ key: s(c.label) || s(c.href) || "(no label)", value: Number(c.clicks), cells: [fmt.n(c.clicks), fmt.pct(c.ctr as number)] }))} columns={["Clicks", "CTR"]} empty="No clicks yet" />
           </div>
         </div>
@@ -85,35 +86,35 @@ export function SectionsTab({ siteId, range }: { siteId: string; range: string }
   const list = pages.data?.pages ?? [];
   const path = picked ?? (list[0] ? s(list[0].path) : null);
   const secs = useReport<{ sections: Sec[] }>(siteId, "sections", { range, path: path ?? undefined }, !!path);
-  if (pages.error) return <Empty>{pages.error}</Empty>;
-  if (!pages.data) return <Empty>Loading…</Empty>;
+  if (pages.error) return <Card><Empty>{pages.error}</Empty></Card>;
+  if (!pages.data) return <Card><Loading rows={6} /></Card>;
   if (!list.length) return <Empty>No section data yet. Sections are detected automatically on every page; they appear after the first visits.</Empty>;
   const rows = secs.data?.sections ?? [];
   const maxDwell = Math.max(...rows.map(r => r.avgDwellMs), 1);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] text-muted">Page</span>
-        <select value={path ?? ""} onChange={e => setPath(e.target.value)} className="rounded-lg border border-line bg-panel px-2.5 py-1.5 text-[13px]">
+        <span className="text-[13px] font-medium text-muted">Page</span>
+        <select value={path ?? ""} onChange={e => setPath(e.target.value)} className={`${field} min-w-72`}>
           {list.map(p => <option key={s(p.path)} value={s(p.path)}>{s(p.path)} · {fmt.n(p.views)} views</option>)}
         </select>
       </div>
-      <Card title="Reading funnel: how far down the page people get, and what each section is worth"
+      <Card title="Reading funnel" subtitle="How far down the page people get, and what each section is worth"
         action={<span className="text-[12px] text-muted">Top to bottom in page order</span>}>
-        {!secs.data ? <Empty>Loading…</Empty> : !rows.length ? <Empty>No sections seen on this page yet.</Empty> : (
+        {!secs.data ? <Loading rows={6} /> : !rows.length ? <Empty>No sections seen on this page yet.</Empty> : (
           <div className="space-y-1">
             <div className="hidden grid-cols-[1fr_90px_90px_80px_150px] gap-3 px-1 pb-1 text-[11px] uppercase tracking-wide text-muted md:grid">
               <span>Section · reach</span><span className="text-right">Avg. read</span><span className="text-right">Engaged</span><span className="text-right">Clicks</span><span className="text-right">Readers convert</span>
             </div>
             {rows.map(r => (
-              <div key={r.id} className="grid grid-cols-2 items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-panel-2 md:grid-cols-[1fr_90px_90px_80px_150px]">
+              <div key={r.id} className="grid grid-cols-2 items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-panel-2 md:grid-cols-[minmax(0,1fr)_110px_110px_90px_190px]">
                 <div className="col-span-2 min-w-0 md:col-span-1">
                   <div className="flex items-center justify-between gap-2 text-[13px]">
                     <span className="truncate font-medium" title={r.id}>{r.name}</span>
                     <span className="tabular text-muted">{fmt.pct(r.reach)}</span>
                   </div>
-                  <div className="mt-1 h-2 rounded bg-panel-2"><div className="h-2 rounded bg-accent" style={{ width: `${Math.min(100, r.reach ?? 0)}%` }} /></div>
+                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-panel-2"><div className="h-2 rounded-full bg-accent" style={{ width: `${Math.min(100, r.reach ?? 0)}%` }} /></div>
                 </div>
                 <div className="text-right text-[13px]">
                   <span className="text-muted md:hidden">Avg. read </span><span className="tabular">{fmt.ms(r.avgDwellMs)}</span>
@@ -149,10 +150,10 @@ export function SectionsTab({ siteId, range }: { siteId: string; range: string }
 export function VisitorsTab({ siteId, range }: { siteId: string; range: string }) {
   const { data, error } = useReport<{ visits: R[] }>(siteId, "visitors", { range });
   const [open, setOpen] = useState<string | null>(null);
-  if (error) return <Empty>{error}</Empty>;
-  if (!data) return <Empty>Loading…</Empty>;
+  if (error) return <Card><Empty>{error}</Empty></Card>;
+  if (!data) return <Card><Loading rows={6} /></Card>;
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_480px]">
       <Card title={`Recent visits (${data.visits.length})`}>
         {!data.visits.length ? <Empty>No visits in this period.</Empty> : (
           <div className="max-h-[75vh] divide-y divide-line overflow-y-auto">
@@ -171,7 +172,7 @@ export function VisitorsTab({ siteId, range }: { siteId: string; range: string }
                   </div>
                 </div>
                 <div className="text-right text-[12px]">
-                  <div className="tabular">{s(v.page_count)} pages · {fmt.ms(v.active_ms)}</div>
+                  <div className="tabular">{s(v.page_count)} {Number(v.page_count) === 1 ? "page" : "pages"} · {fmt.ms(v.active_ms)}</div>
                   <div className="text-muted">{fmt.ago(v.started_at)}</div>
                 </div>
               </button>
@@ -179,7 +180,7 @@ export function VisitorsTab({ siteId, range }: { siteId: string; range: string }
           </div>
         )}
       </Card>
-      <div className="lg:sticky lg:top-16 lg:self-start">
+      <div className="xl:sticky xl:top-8 xl:self-start">
         {open ? <Journey siteId={siteId} visitId={open} onOpen={setOpen} /> : <Card title="Visit replay"><Empty>Pick a visit to see every page, section and click in order.</Empty></Card>}
       </div>
     </div>
@@ -196,7 +197,7 @@ interface JourneyT {
 function Journey({ siteId, visitId, onOpen }: { siteId: string; visitId: string; onOpen: (id: string) => void }) {
   const { data, error } = useReport<JourneyT>(siteId, "journey", { visit: visitId });
   if (error) return <Card title="Visit replay"><Empty>{error}</Empty></Card>;
-  if (!data) return <Card title="Visit replay"><Empty>Loading…</Empty></Card>;
+  if (!data) return <Card title="Visit replay"><Loading rows={6} /></Card>;
   const v = data.visit;
   return (
     <Card title="Visit replay" action={v.converted ? <Badge tone="good">Converted</Badge> : <Badge>No conversion</Badge>}>
@@ -266,59 +267,64 @@ export function SettingsTab({ site }: { site: SiteProps }) {
     const d = await res.json().catch(() => ({}));
     setMsg(res.ok ? "Saved ✓" : d.error ?? "Failed");
   };
-  const input = "rounded-lg border border-line bg-panel px-2.5 py-1.5 text-[13px] outline-none focus:border-accent";
   return (
-    <div className="space-y-4">
-      <Card title="Conversion goals" action={msg && <span className="text-[12px]">{msg}</span>}>
-        <p className="mb-3 text-[13px] text-muted">A visit counts as converted when it matches any goal. The defaults catch most sign-up and checkout flows without setup. Patterns are case-insensitive regular expressions.</p>
-        <div className="space-y-2">
+    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+      <Card title="Conversion goals" subtitle="A visit counts as converted when it matches any goal. Patterns are case-insensitive regular expressions."
+        action={msg && <Badge tone={msg.startsWith("Saved") ? "good" : "bad"}>{msg}</Badge>}>
+        <div className="space-y-2.5">
           {goals.map((g, i) => (
-            <div key={g.id} className="flex flex-col gap-2 rounded-lg border border-line p-2 md:flex-row md:items-center">
-              <select value={g.type} className={input} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, type: e.target.value as typeof g.type } : x))}>
+            <div key={g.id} className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2/40 p-2.5 md:flex-row md:items-center">
+              <Icon name="target" size={16} className="hidden text-faint md:block" />
+              <select value={g.type} className={`${field} md:w-60 md:shrink-0`} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, type: e.target.value as typeof g.type } : x))}>
                 {GOAL_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
               {g.type !== "app_link" && (
-                <input value={g.pattern} placeholder={GOAL_TYPES.find(t => t.id === g.type)?.hint} className={`${input} min-w-0 flex-1 font-mono`}
+                <input value={g.pattern} placeholder={GOAL_TYPES.find(t => t.id === g.type)?.hint} className={`${field} min-w-0 font-mono md:flex-[3]`}
                   onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, pattern: e.target.value } : x))} />
               )}
-              <input value={g.label} placeholder="Name" className={`${input} md:w-56`} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
-              <Button variant="danger" onClick={() => setGoals(goals.filter((_, j) => j !== i))}>Remove</Button>
+              <input value={g.label} placeholder="Name" className={`${field} min-w-0 md:flex-[2]`} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
+              <button title="Remove goal" className="self-end rounded-md p-2 text-muted transition hover:bg-bad-soft hover:text-bad md:self-auto" onClick={() => setGoals(goals.filter((_, j) => j !== i))}><Icon name="trash" size={15} /></button>
             </div>
           ))}
+          {!goals.length && <Empty>No goals. Without one, nothing counts as a conversion.</Empty>}
         </div>
-        <div className="mt-3 flex gap-2">
-          <Button variant="ghost" onClick={() => setGoals([...goals, { id: `g_${Date.now()}`, type: "click_text", pattern: "", label: "" }])}>+ Add goal</Button>
+        <div className="mt-4 flex gap-2">
+          <Button variant="ghost" onClick={() => setGoals([...goals, { id: `g_${Date.now()}`, type: "click_text", pattern: "", label: "" }])}><Icon name="plus" size={14} />Add goal</Button>
           <Button onClick={() => save({ goals })}>Save goals</Button>
         </div>
       </Card>
 
-      <Card title="Privacy">
-        <label className="flex items-start gap-3 text-[13px]">
-          <input type="checkbox" checked={persistent} className="mt-1" onChange={e => { setPersistent(e.target.checked); save({ settings: { persistentIds: e.target.checked } }); }} />
-          <span>
-            <b>Recognise returning visitors</b> (stores a random ID in the visitor&apos;s browser).<br />
-            <span className="text-muted">Off by default: visitors are counted with a hash that rotates daily, so no cookie banner is needed. Turn this on only if your site asks for consent,
-              then add <code className="font-mono">data-persistent=&quot;true&quot;</code> to the tag, or call <code className="font-mono">pagewise(&apos;consent&apos;, true)</code> after the visitor accepts.</span>
-          </span>
-        </label>
-      </Card>
+      <div className="space-y-6">
+        <Card title={<span className="flex items-center gap-2"><Icon name="shield" size={15} className="text-accent" />Privacy</span>}>
+          <label className="flex cursor-pointer items-start gap-3 text-[13px]">
+            <input type="checkbox" checked={persistent} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" onChange={e => { setPersistent(e.target.checked); save({ settings: { persistentIds: e.target.checked } }); }} />
+            <span>
+              <b>Recognise returning visitors</b>
+              <span className="mt-1 block leading-relaxed text-muted">Stores a random ID in the visitor&apos;s browser. Off by default: visitors are counted with a hash that rotates daily, so no cookie banner is needed. Turn this on only if your site asks for consent,
+                then add <code className="font-mono text-ink">data-persistent=&quot;true&quot;</code> to the tag, or call <code className="font-mono text-ink">pagewise(&apos;consent&apos;, true)</code> after the visitor accepts.</span>
+            </span>
+          </label>
+        </Card>
 
-      <Card title="Developer API">
-        <div className="space-y-2 text-[13px]">
-          <p>Track anything the automatic listeners can&apos;t see:</p>
-          <pre className="overflow-x-auto rounded-lg bg-panel-2 p-3 font-mono text-[12px]">{`pagewise('track', 'Signed up', { plan: 'pro' })`}</pre>
-          <p>Name your sections (optional; they&apos;re detected automatically):</p>
-          <pre className="overflow-x-auto rounded-lg bg-panel-2 p-3 font-mono text-[12px]">{`<section data-section="pricing" data-section-name="Pricing">…</section>`}</pre>
-        </div>
-      </Card>
+        <Card title={<span className="flex items-center gap-2"><Icon name="code" size={15} className="text-accent" />Developer API</span>}>
+          <div className="space-y-2.5 text-[13px]">
+            <p className="text-muted">Track anything the automatic listeners can&apos;t see:</p>
+            <pre className="overflow-x-auto rounded-lg border border-line bg-panel-2 p-3 font-mono text-[12px]">{`pagewise('track', 'Signed up', { plan: 'pro' })`}</pre>
+            <p className="text-muted">Name your sections (optional; they&apos;re detected automatically):</p>
+            <pre className="overflow-x-auto rounded-lg border border-line bg-panel-2 p-3 font-mono text-[12px]">{`<section data-section="pricing"
+  data-section-name="Pricing">…</section>`}</pre>
+          </div>
+        </Card>
 
-      <Card title="Danger zone">
-        <Button variant="danger" onClick={async () => {
-          if (!confirm(`Delete ${site.domain} and all of its data? This can't be undone.`)) return;
-          const res = await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
-          if (res.ok) window.location.href = "/sites";
-        }}>Delete this website and its data</Button>
-      </Card>
+        <Card title="Danger zone" className="border-bad/25">
+          <p className="mb-3 text-[13px] text-muted">Deletes {site.domain} and every visit, page view and click recorded for it.</p>
+          <Button variant="danger" onClick={async () => {
+            if (!confirm(`Delete ${site.domain} and all of its data? This can't be undone.`)) return;
+            const res = await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
+            if (res.ok) window.location.href = "/sites";
+          }}><Icon name="trash" size={14} />Delete website</Button>
+        </Card>
+      </div>
     </div>
   );
 }

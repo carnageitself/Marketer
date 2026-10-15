@@ -62,11 +62,36 @@ export const DNS_PROVIDER_LINKS: Record<string, string> = {
   ionos: "https://my.ionos.com/domains",
 };
 
+/**
+ * Response-header fingerprints (the approach Wappalyzer and BuiltWith use).
+ * Hosts set these on the origin, so they still identify the host when the
+ * site sits behind a proxy like Cloudflare that hides its IP. Most specific first.
+ */
+const HEADER_HOSTS: Array<{ test: (hv: (k: string) => string) => boolean; id: string; name: string }> = [
+  { test: hv => /hostinger/i.test(hv("platform")) || hv("panel") === "hpanel", id: "hostinger", name: "Hostinger" },
+  { test: hv => !!hv("x-kinsta-cache") || /kinsta/i.test(hv("server")), id: "kinsta", name: "Kinsta" },
+  { test: hv => !!hv("wpe-backend") || !!hv("x-wpe-request-id") || /wp engine/i.test(hv("x-powered-by")), id: "wpengine", name: "WP Engine" },
+  { test: hv => !!hv("x-fw-hash") || !!hv("x-fw-serve"), id: "flywheel", name: "Flywheel" },
+  { test: hv => hv("host-header") === "c2hhcmVkLmJsdWVob3N0LmNvbQ==", id: "bluehost", name: "Bluehost" },
+  { test: hv => hv("host-header") === "6b7412fb82ca5edfd0917e3957f05d89" || !!hv("x-sg-id") || /siteground/i.test(hv("x-proxy-cache-info")), id: "siteground", name: "SiteGround" },
+  { test: hv => !!hv("x-pantheon-styx-hostname"), id: "pantheon", name: "Pantheon" },
+  { test: hv => !!hv("x-ah-environment"), id: "acquia", name: "Acquia" },
+  { test: hv => /wordpress\.com/i.test(hv("host-header")) || /wordpress\.com/i.test(hv("x-hacker")), id: "wordpresscom", name: "WordPress.com" },
+  { test: hv => !!hv("x-render-origin-server") || /^render$/i.test(hv("server")), id: "render", name: "Render" },
+  { test: hv => !!hv("fly-request-id"), id: "fly", name: "Fly.io" },
+  { test: hv => !!hv("x-railway-request-id") || /railway/i.test(hv("server")), id: "railway", name: "Railway" },
+  { test: hv => !!hv("x-do-app-origin"), id: "digitalocean", name: "DigitalOcean App Platform" },
+  { test: hv => !!hv("x-azure-ref"), id: "azure", name: "Microsoft Azure" },
+  { test: hv => /google frontend/i.test(hv("server")), id: "gcp", name: "Google Cloud" },
+];
+
 function hostFrom(records: ScanResult["records"], headers: Headers | null): ScanResult["host"] {
   const all = [...records.cname, ...records.wwwCname].join(" ");
   const a = records.a;
   const hv = (k: string) => headers?.get(k) ?? "";
   const server = hv("server").toLowerCase();
+  const byHeader = HEADER_HOSTS.find(h => h.test(hv));
+  if (byHeader) return { id: byHeader.id, name: byHeader.name };
   if (hv("x-vercel-id") || /vercel/.test(all) || a.some(ip => ip === "76.76.21.21" || ip.startsWith("216.198.79."))) return { id: "vercel", name: "Vercel" };
   if (hv("x-nf-request-id") || /netlify/.test(all) || server.includes("netlify")) return { id: "netlify", name: "Netlify" };
   if (/shopify/.test(all) || hv("x-shopid") || a.some(ip => ip.startsWith("23.227.38."))) return { id: "shopify", name: "Shopify" };
@@ -83,8 +108,10 @@ function hostFrom(records: ScanResult["records"], headers: Headers | null): Scan
   if (/firebaseapp|web\.app/.test(all) || a.some(ip => ip.startsWith("199.36.158."))) return { id: "firebase", name: "Firebase Hosting" };
   if (/ghost\.io/.test(all)) return { id: "ghost", name: "Ghost(Pro)" };
   if (/hubspot/.test(all)) return { id: "hubspot", name: "HubSpot" };
-  if (server.includes("litespeed")) return { id: "litespeed", name: "LiteSpeed host (e.g. Hostinger)" };
+  if (server.includes("litespeed") || /litespeed/i.test(hv("x-turbo-charged-by"))) return { id: "litespeed", name: "LiteSpeed web host" };
   if (server.includes("nginx") || server.includes("apache")) return { id: "server", name: `Own server (${server.split("/")[0]})` };
+  // Cloudflare's proxy hides the origin's IP and headers; say so instead of "Unknown".
+  if (hv("cf-ray")) return { id: "cloudflare-proxy", name: "Behind Cloudflare (origin hidden)" };
   return null;
 }
 
