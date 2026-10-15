@@ -130,4 +130,16 @@ create table if not exists custom_events (
   props       jsonb not null default '{}'::jsonb
 );
 create index if not exists custom_events_site_idx on custom_events (site_id, ts desc);
+
+-- Row level security with no policies: hosts like Supabase expose the public
+-- schema over a REST API with a public key, and this makes every table
+-- unreachable that way. The app connects as the table owner, which bypasses it.
+alter table users          enable row level security;
+alter table auth_sessions  enable row level security;
+alter table sites          enable row level security;
+alter table visits         enable row level security;
+alter table pageviews      enable row level security;
+alter table section_views  enable row level security;
+alter table clicks         enable row level security;
+alter table custom_events  enable row level security;
 `;
