@@ -20,6 +20,8 @@ export interface ScanResult {
   cloudflareProxied: boolean;
   scriptFound: boolean;
   records: { a: string[]; cname: string[]; wwwCname: string[] };
+  /** Domain Connect: the DNS provider's sign-in-and-approve flow, when it offers one. */
+  domainConnect?: { providerId: string; providerName: string; supported: boolean } | null;
   error?: string;
 }
 
@@ -136,6 +138,7 @@ export async function setupInfo(site: Site, origin: string) {
   const { DNS_PROVIDER_LINKS } = await import("./dns/detect");
   const { PROVIDER_FIELDS } = await import("./dns/providers");
   const { cnameTarget, desiredRecords } = await import("./dns/records");
+  const { cloudflareOAuth } = await import("./dns/cloudflare-oauth");
   return {
     site,
     snippet: snippet(site, origin),
@@ -144,5 +147,7 @@ export async function setupInfo(site: Site, origin: string) {
     cnameAvailable: !!cnameTarget(),
     providerFields: PROVIDER_FIELDS,
     providerLink: site.scan.dnsProvider ? DNS_PROVIDER_LINKS[site.scan.dnsProvider.id] ?? null : null,
+    /** Sign-in setup this server can offer (the rest falls back to API tokens). */
+    signIn: { cloudflare: !!cloudflareOAuth() },
   };
 }

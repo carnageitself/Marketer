@@ -5,7 +5,7 @@ import { useState } from "react";
 import AppShell, { type NavId } from "./AppShell";
 import { AreaChart, type SeriesPoint } from "./Chart";
 import { Icon } from "./icons";
-import { Badge, BarList, Card, Delta, Empty, Loading, PageHeader, Stat, Tabs, fmt } from "./ui";
+import { Badge, BarList, Card, Delta, Empty, Loading, PageHeader, Tabs, fmt } from "./ui";
 import { useReport } from "./useReport";
 import { PagesTab, SectionsTab, SettingsTab, VisitorsTab } from "./DashboardTabs";
 
@@ -62,8 +62,12 @@ export default function Dashboard({ email, site, initialTab }: { email: string; 
 
 // ── Overview ────────────────────────────────────────────────────────────────
 
-interface Kpis { visitors: number; visits: number; pageviews: number; pagesPerVisit: number; avgActiveMs: number; bounceRate: number | null; conversions: number; conversionRate: number | null }
-interface OverviewData { range: { bucket: "hour" | "day" }; kpis: Kpis; previous: Kpis; series: SeriesPoint[]; live: number }
+interface Kpis {
+  visitors: number; visits: number; pageviews: number; pagesPerVisit: number; avgActiveMs: number; bounceRate: number | null;
+  conversions: number; conversionRate: number | null; engagedRate: number | null; clickRate: number | null; readThroughRate: number | null;
+}
+interface Side { visits: number; pages: number; activeMs: number; scroll: number; clickRate: number | null; topSource: string; topEntry: string; topDevice: string }
+interface OverviewData { range: { bucket: "hour" | "day" }; kpis: Kpis; previous: Kpis; series: SeriesPoint[]; live: number; converters: { converted: Side | null; others: Side | null } }
 interface InsightT { tone: "good" | "bad" | "info"; title: string; detail: string; tab?: Tab }
 type Row = Record<string, unknown> & { key: string };
 type Metric = "visitors" | "visits" | "pageviews" | "conversions";
@@ -136,13 +140,9 @@ function Overview({ siteId, range, go }: { siteId: string; range: string; go: (t
         </Card>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {!k || !p ? Array.from({ length: 4 }, (_, i) => <div key={i} className="h-19.5 animate-pulse rounded-xl border border-line bg-panel" />) : <>
-          <Stat label="Conversion rate" value={fmt.pct(k.conversionRate)} delta={delta(k.conversionRate, p.conversionRate)} hint={`${k.conversions} converting visits`} />
-          <Stat label="Pages per visit" value={k.pagesPerVisit} delta={delta(k.pagesPerVisit, p.pagesPerVisit)} />
-          <Stat label="Avg. active time" value={fmt.ms(k.avgActiveMs)} delta={delta(k.avgActiveMs, p.avgActiveMs)} hint="Time the tab was actually visible" />
-          <Stat label="Bounce rate" value={fmt.pct(k.bounceRate)} delta={delta(k.bounceRate, p.bounceRate)} invert hint="One page, no clicks, under 10 seconds" />
-        </>}
+      <div className="grid items-start gap-6 xl:grid-cols-2">
+        <QualityCard k={k} p={p} />
+        <ConvertersCard data={data?.converters} go={go} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2 2xl:grid-cols-3">
@@ -157,6 +157,109 @@ function Overview({ siteId, range, go }: { siteId: string; range: string; go: (t
         </Card>
       </div>
     </div>
+  );
+}
+
+// ── Visitor quality: each number with what it means and whether it's good ──
+
+interface QualityRow { key: keyof Kpis; label: string; explain: string; typical: string; good: number; ok: number; lowerIsBetter?: boolean; show: (v: number) => string }
+// Rough rules of thumb for small business and SaaS marketing sites.
+const QUALITY: QualityRow[] = [
+  { key: "conversionRate", label: "Conversion rate", explain: "Visits that reached one of your goals.", typical: "Typical: 1–3%", good: 3, ok: 1, show: v => `${v}%` },
+  { key: "engagedRate", label: "Engaged visits", explain: "Stayed 30s+, viewed 2+ pages, or converted.", typical: "Typical: 40–60%", good: 60, ok: 40, show: v => `${v}%` },
+  { key: "bounceRate", label: "Bounce rate", explain: "Left after one page with no clicks, in under 10s.", typical: "Typical: 40–60%", good: 40, ok: 60, lowerIsBetter: true, show: v => `${v}%` },
+  { key: "readThroughRate", label: "Read to the end", explain: "Page views scrolled at least 75% of the way down.", typical: "Typical: 20–40%", good: 40, ok: 20, show: v => `${v}%` },
+  { key: "clickRate", label: "Clicked something", explain: "Visits with at least one click on a link or button.", typical: "Typical: 20–40%", good: 40, ok: 20, show: v => `${v}%` },
+  { key: "pagesPerVisit", label: "Pages per visit", explain: "How far people explore past the first page.", typical: "Typical: 1.5–3", good: 3, ok: 1.5, show: v => String(v) },
+  { key: "avgActiveMs", label: "Active time per visit", explain: "Time the tab was visible; idle tabs don't count.", typical: "Typical: 30s–2m", good: 120_000, ok: 30_000, show: v => fmt.ms(v) },
+];
+
+function verdict(row: QualityRow, v: number): { tone: "good" | "neutral" | "bad"; label: string } {
+  if (row.lowerIsBetter) return v <= row.good ? { tone: "good", label: "Strong" } : v <= row.ok ? { tone: "neutral", label: "Typical" } : { tone: "bad", label: "High" };
+  return v >= row.good ? { tone: "good", label: "Strong" } : v >= row.ok ? { tone: "neutral", label: "Typical" } : { tone: "bad", label: "Low" };
+}
+
+function QualityCard({ k, p }: { k?: Kpis; p?: Kpis }) {
+  const early = !!k && k.visits < 30;
+  return (
+    <Card title="Visitor quality" subtitle="What each number means, and how it compares with typical websites" flush>
+      {!k || !p ? <div className="p-5"><Loading rows={6} /></div> : (
+        <div className="divide-y divide-line">
+          {QUALITY.map(row => {
+            const v = k[row.key] as number | null;
+            const prev = p[row.key] as number | null;
+            const vd = v === null ? null : verdict(row, v);
+            return (
+              <div key={row.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_88px_64px_84px]">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-medium">{row.label}</div>
+                  <div className="text-[12px] leading-snug text-muted">{row.explain}</div>
+                  <div className="mt-0.5 text-[11.5px] text-faint">{row.typical}</div>
+                </div>
+                <div className="tabular text-right text-[15px] font-semibold">{v === null ? "—" : row.show(v)}</div>
+                <div className="hidden justify-end sm:flex"><Delta value={delta(v, prev)} invert={row.lowerIsBetter} /></div>
+                <div className="hidden justify-end sm:flex">
+                  {vd && <Badge tone={vd.tone === "neutral" ? "neutral" : vd.tone}>{vd.label}</Badge>}
+                </div>
+              </div>
+            );
+          })}
+          {early && <p className="px-5 py-3 text-[12px] text-muted">Based on {k.visits} visit{k.visits === 1 ? "" : "s"}. Verdicts settle down after about 30 visits.</p>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── What converters do differently ──────────────────────────────────────────
+
+function ConvertersCard({ data, go }: { data?: { converted: Side | null; others: Side | null }; go: (t: Tab) => void }) {
+  const c = data?.converted, o = data?.others;
+  const times = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 10) / 10 : null);
+  const pagesX = c && o ? times(c.pages, o.pages) : null;
+  const timeX = c && o ? times(c.activeMs, o.activeMs) : null;
+  const rows: { label: string; a: string; b: string; win?: boolean }[] = c && o ? [
+    { label: "Visits", a: fmt.n(c.visits), b: fmt.n(o.visits) },
+    { label: "Pages per visit", a: String(c.pages), b: String(o.pages), win: c.pages > o.pages },
+    { label: "Active time", a: fmt.ms(c.activeMs), b: fmt.ms(o.activeMs), win: c.activeMs > o.activeMs },
+    { label: "Avg. scroll depth", a: `${c.scroll}%`, b: `${o.scroll}%`, win: c.scroll > o.scroll },
+    { label: "Clicked something", a: fmt.pct(c.clickRate), b: fmt.pct(o.clickRate), win: (c.clickRate ?? 0) > (o.clickRate ?? 0) },
+    { label: "Most common source", a: c.topSource, b: o.topSource },
+    { label: "Most common landing page", a: c.topEntry, b: o.topEntry },
+    { label: "Most common device", a: c.topDevice, b: o.topDevice },
+  ] : [];
+  return (
+    <Card title={<span className="flex items-center gap-2"><Icon name="target" size={15} className="text-accent" />What converters do differently</span>}
+      subtitle="Visits that reached a goal, compared with the rest" flush>
+      {!data ? <div className="p-5"><Loading rows={6} /></div> : !c ? (
+        <Empty>
+          <span>No conversions in this period yet. Check that your goals match how people sign up or buy in{" "}
+            <button className="font-medium text-accent hover:underline" onClick={() => go("settings")}>Goals &amp; settings</button>.</span>
+        </Empty>
+      ) : !o ? <Empty>Every visit in this period converted, so there&apos;s nothing to compare yet.</Empty> : (
+        <>
+          {(pagesX !== null || timeX !== null) && (
+            <div className="border-b border-line bg-accent-soft/40 px-5 py-3.5 text-[13px] leading-relaxed">
+              People who convert view <b>{pagesX ?? "—"}×</b> as many pages and spend <b>{timeX ?? "—"}×</b> as long on your site.
+              {c.topEntry !== o.topEntry && <> They most often arrive on <b className="font-mono text-[12px]">{c.topEntry}</b>.</>}
+            </div>
+          )}
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-x-4 px-5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wider text-faint">
+            <span /><span className="text-right">Converted</span><span className="text-right">Didn&apos;t</span>
+          </div>
+          <div className="divide-y divide-line">
+            {rows.map(r => (
+              <div key={r.label} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-4 px-5 py-2.5 text-[13px]">
+                <span className="text-muted">{r.label}</span>
+                <span className={`tabular truncate text-right ${r.win ? "font-semibold text-good" : "font-medium"}`} title={r.a}>{r.a}</span>
+                <span className="tabular truncate text-right text-muted" title={r.b}>{r.b}</span>
+              </div>
+            ))}
+          </div>
+          <p className="px-5 py-3 text-[11.5px] text-faint">Converted visits include the pages people see after converting, such as a thank-you page.</p>
+        </>
+      )}
+    </Card>
   );
 }
 

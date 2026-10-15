@@ -35,7 +35,7 @@ const COUNTRIES = ["US", "US", "US", "IN", "GB", "DE", "CA", "FR", "AU", "BR"];
 
 // page → ordered sections [id, name, chance a viewer reaches it, typical read ms]
 const PAGES = {
-  "/": { title: "Acme Notes: your second brain", sections: [
+  "/": { title: "Brightnote: your second brain", sections: [
     ["hero", "Your second brain, finally organised", 1, 6000], ["how-it-works", "How it works", 0.78, 9000],
     ["testimonials", "Loved by 20,000 teams", 0.46, 7000], ["integrations", "Integrations", 0.33, 4000],
     ["faq", "Frequently asked questions", 0.12, 8000], ["footer", "Footer", 0.1, 1500]] },
@@ -44,7 +44,7 @@ const PAGES = {
   "/features": { title: "Features", sections: [
     ["everything", "Everything in one place", 1, 7000], ["offline", "Works offline", 0.6, 5000], ["cta", "Ready to try it?", 0.42, 3000]] },
   "/blog/how-we-write": { title: "How we write 10x faster", sections: [
-    ["article", "How we write 10x faster", 1, 45000], ["cta", "Try Acme Notes", 0.3, 3000]] },
+    ["article", "How we write 10x faster", 1, 45000], ["cta", "Try Brightnote", 0.3, 3000]] },
 };
 
 async function send(ip, ua, events) {
@@ -95,7 +95,7 @@ async function visit(i) {
       : path === "/blog/how-we-write" ? weighted([["/", 30], ["/pricing", 20], [null, 50]])
       : path === "/features" ? weighted([["/pricing", 50], [null, 50]]) : null;
     if (next) events.push({ t: "click", pv, path, label: next === "/pricing" ? "See pricing" : next === "/features" ? "Features" : "Home", kind: "internal", href: `${base}${next}`, tpath: next, sec: null, ts: t });
-    else if (chance(0.15)) events.push({ t: "click", pv, path, label: "GitHub", kind: "external", href: "https://github.com/acme", tpath: null, sec: "footer", ts: t });
+    else if (chance(0.15)) events.push({ t: "click", pv, path, label: "GitHub", kind: "external", href: "https://github.com/brightnote", tpath: null, sec: "footer", ts: t });
     prev = path; path = next;
   }
   // Send in batches like the browser does.

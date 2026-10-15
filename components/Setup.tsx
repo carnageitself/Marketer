@@ -17,10 +17,11 @@ interface SiteT {
     dnsProvider?: { id: string; name: string; auto: boolean; nameservers: string[] } | null;
     host?: { id: string; name: string } | null; platform?: { id: string; name: string } | null;
     records?: { a: string[]; cname: string[]; wwwCname: string[] };
+    domainConnect?: { providerId: string; providerName: string; supported: boolean } | null;
   };
   dns: { subdomain?: string; cnameVerifiedAt?: string; worker?: { script: string; installedAt: string }; log?: { at: string; text: string; ok: boolean }[] };
 }
-interface Info { site: SiteT; snippet: string; origin: string; records: Rec[]; cnameAvailable: boolean; providerFields: Record<string, ProviderSpec>; providerLink: string | null }
+interface Info { site: SiteT; snippet: string; origin: string; records: Rec[]; cnameAvailable: boolean; providerFields: Record<string, ProviderSpec>; providerLink: string | null; signIn: { cloudflare: boolean } }
 interface Check { records: Rec[]; installed: boolean; scriptOnHomepage: boolean | null; visits: number; lastSeen: string | null; site: SiteT }
 
 export default function Setup({ initial, email }: { initial: Info; email: string }) {
@@ -29,6 +30,17 @@ export default function Setup({ initial, email }: { initial: Info; email: string
   const [check, setCheck] = useState<Check | null>(null);
   const [guide, setGuide] = useState(() => guideFor(initial.site.scan.platform?.id));
   const [scanning, setScanning] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // Result of a "sign in to your DNS provider" round trip, passed back in the URL.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const c = p.get("connect");
+    if (!c) return;
+    const t = setTimeout(() => setNotice({ ok: c === "ok", msg: p.get("msg") ?? "" }), 0);
+    history.replaceState(null, "", window.location.pathname);
+    return () => clearTimeout(t);
+  }, []);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/sites/${siteId}`);
@@ -68,11 +80,23 @@ export default function Setup({ initial, email }: { initial: Info; email: string
     { label: "Verify your domain", done: !!site.verified_at, optional: true },
   ];
   const doneCount = steps.filter(s => s.done).length;
+  // Best sign-in route for DNS: Cloudflare OAuth, else Domain Connect at their provider.
+  const signIn = provider?.id === "cloudflare" && info.signIn.cloudflare ? { via: "cloudflare", name: "Cloudflare" }
+    : scan.domainConnect?.supported ? { via: "domainconnect", name: scan.domainConnect.providerName } : null;
+  const connectHref = (via: string, intent: string) => `/api/connect/start?site=${site.id}&via=${via}&intent=${intent}`;
 
   return (
     <AppShell email={email} site={site} active="setup">
       <PageHeader title={`Set up ${site.domain}`} subtitle="Everything on this page updates on its own. There's no verify button to press."
         actions={<Link href={`/sites/${site.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-[13px] font-medium text-on-accent shadow-card hover:bg-accent-hover">Open dashboard<Icon name="arrowRight" size={14} /></Link>} />
+
+      {notice && (
+        <div className={`mb-6 flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px] ${notice.ok ? "border-good/25 bg-good-soft" : "border-bad/25 bg-bad-soft"}`}>
+          <Icon name={notice.ok ? "check" : "close"} size={16} className={`mt-0.5 ${notice.ok ? "text-good" : "text-bad"}`} />
+          <span className="flex-1">{notice.msg}</span>
+          <button onClick={() => setNotice(null)} className="text-muted hover:text-ink" aria-label="Dismiss"><Icon name="close" size={14} /></button>
+        </div>
+      )}
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-6">
@@ -98,7 +122,12 @@ export default function Setup({ initial, email }: { initial: Info; email: string
           {/* 2 — install */}
           <Step n={2} done={installed} title="Add the tracker" action={<InstallStatus check={check} />}>
             <div className="space-y-6">
-              {scan.cloudflareProxied && <CloudflareWorker site={site} spec={info.providerFields.cloudflare} onDone={load} />}
+              {scan.cloudflareProxied && (info.signIn.cloudflare || site.dns.worker
+                ? <CloudflareWorker site={site} spec={info.providerFields.cloudflare} onDone={load}
+                    signInHref={info.signIn.cloudflare ? (intent: string) => connectHref("cloudflare", intent) : undefined} />
+                : <Advanced className="" label="Advanced: install with zero code using a Cloudflare API token">
+                    <CloudflareWorker site={site} spec={info.providerFields.cloudflare} onDone={load} />
+                  </Advanced>)}
 
               <div>
                 <div className="mb-2 flex items-center justify-between">
@@ -139,14 +168,28 @@ export default function Setup({ initial, email }: { initial: Info; email: string
               Proves you own {site.domain}{info.cnameAvailable ? ` and serves the tracker from your own subdomain, so ad blockers don't drop your numbers` : ""}.
               {!info.cnameAvailable && " First-party tracking turns on once Pagewise is deployed with a CNAME_TARGET."}
             </p>
+            {signIn && !site.verified_at && (
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-accent/25 bg-accent-soft/60 p-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[13.5px] font-semibold"><Icon name="bolt" size={14} className="text-accent" />Set it up by signing in to {signIn.name}</div>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-muted">You&apos;ll sign in at {signIn.name} and approve the records below. We never see your password, and nothing else is changed.</p>
+                </div>
+                <a href={connectHref(signIn.via, "dns")} className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg bg-accent px-4 text-[13.5px] font-medium text-on-accent shadow-card hover:bg-accent-hover">
+                  Connect with {signIn.name}<Icon name="arrowRight" size={14} />
+                </a>
+              </div>
+            )}
             <RecordsTable records={records} />
-            {provider && spec ? (
-              <AutoDns site={site} provider={provider.id} spec={spec} onDone={() => { load(); runCheck(); }} />
-            ) : (
+            {!signIn && (
               <p className="mt-4 text-[13px]">
                 Add {records.length > 1 ? "these records" : "this record"} in {provider?.name ?? "your DNS provider"}&apos;s dashboard
                 {info.providerLink && <> (<a className="font-medium text-accent hover:underline" href={info.providerLink} target="_blank" rel="noreferrer">open it</a>)</>}. We&apos;ll spot it automatically, usually within a few minutes.
               </p>
+            )}
+            {provider && spec && (
+              <Advanced label="Advanced: set it up with an API token">
+                <AutoDns site={site} provider={provider.id} spec={spec} onDone={() => { load(); runCheck(); }} />
+              </Advanced>
             )}
             {!!site.dns.log?.length && (
               <div className="mt-5 space-y-1.5 border-t border-line pt-4">
@@ -219,6 +262,18 @@ function Fact({ icon, label, value, sub, ok }: { icon: IconName; label: string; 
   );
 }
 
+/** Collapsed by default: the API-token routes are for people who prefer them, not the main path. */
+function Advanced({ label, children, className = "mt-4" }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <details className={`group ${className}`}>
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12.5px] font-medium text-muted hover:text-ink">
+        {label}<span className="inline-block transition group-open:rotate-90">›</span>
+      </summary>
+      <div className="mt-1">{children}</div>
+    </details>
+  );
+}
+
 function InstallStatus({ check }: { check: Check | null }) {
   if (!check) return <Badge>Checking…</Badge>;
   if (check.installed) return <Badge tone="good" dot>Receiving data · {fmt.n(check.visits)} visits{check.lastSeen ? ` · last ${fmt.ago(check.lastSeen)}` : ""}</Badge>;
@@ -284,7 +339,7 @@ function AutoDns({ site, provider, spec, onDone }: { site: SiteT; provider: stri
   );
 }
 
-function CloudflareWorker({ site, spec, onDone }: { site: SiteT; spec: ProviderSpec; onDone: () => void }) {
+function CloudflareWorker({ site, spec, onDone, signInHref }: { site: SiteT; spec: ProviderSpec; onDone: () => void; signInHref?: (intent: string) => string }) {
   const [creds, setCreds] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -297,6 +352,17 @@ function CloudflareWorker({ site, spec, onDone }: { site: SiteT; spec: ProviderS
     setMsg(res.ok ? (action === "worker" ? "Installed. Every page now carries the tag; no code change needed." : "Removed.") : d.error ?? "Failed");
     onDone();
   };
+  const tokenForm = (
+    <>
+      <p className="mt-3 text-[12.5px] leading-relaxed text-muted">The token needs Workers Scripts → Edit, Workers Routes → Edit and Zone → Read. <a className="font-medium text-accent hover:underline" href={spec.url} target="_blank" rel="noreferrer">Create one →</a></p>
+      <div className="mt-3"><CredFields spec={spec} values={creds} set={(k, v) => setCreds(c => ({ ...c, [k]: v }))} /></div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {!installed && <Button disabled={busy} onClick={() => go("worker")}>{busy ? "Installing…" : "Install automatically"}</Button>}
+        {installed && <Button variant="danger" disabled={busy} onClick={() => go("worker_remove")}>{busy ? "Removing…" : "Remove Worker"}</Button>}
+        {msg && <span className="text-[12.5px]">{msg}</span>}
+      </div>
+    </>
+  );
   return (
     <div className="rounded-lg border border-accent/25 bg-accent-soft/60 p-4">
       <div className="flex items-center justify-between gap-2">
@@ -305,14 +371,15 @@ function CloudflareWorker({ site, spec, onDone }: { site: SiteT; spec: ProviderS
       </div>
       <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
         We deploy a tiny Cloudflare Worker that adds the tag to every HTML page as it&apos;s served. Your site&apos;s code isn&apos;t touched, and you can remove it any time.
-        The token needs Workers Scripts → Edit, Workers Routes → Edit and Zone → Read. <a className="font-medium text-accent hover:underline" href={spec.url} target="_blank" rel="noreferrer">Create one →</a>
       </p>
-      <div className="mt-3"><CredFields spec={spec} values={creds} set={(k, v) => setCreds(c => ({ ...c, [k]: v }))} /></div>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {!installed && <Button disabled={busy} onClick={() => go("worker")}>{busy ? "Installing…" : "Install automatically"}</Button>}
-        {installed && <Button variant="danger" disabled={busy} onClick={() => go("worker_remove")}>{busy ? "Removing…" : "Remove Worker"}</Button>}
-        {msg && <span className="text-[12.5px]">{msg}</span>}
-      </div>
+      {signInHref && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {!installed
+            ? <a href={signInHref("worker")} className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-[13px] font-medium text-on-accent shadow-card hover:bg-accent-hover">Sign in with Cloudflare to install<Icon name="arrowRight" size={14} /></a>
+            : <a href={signInHref("worker_remove")} className="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-panel px-3.5 text-[13px] font-medium text-bad shadow-card hover:bg-bad-soft">Sign in with Cloudflare to remove</a>}
+        </div>
+      )}
+      {signInHref ? <Advanced label="Advanced: install with an API token">{tokenForm}</Advanced> : tokenForm}
     </div>
   );
 }

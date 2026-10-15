@@ -207,6 +207,11 @@ export async function scanDomain(domain: string, siteId: string): Promise<ScanRe
   const host = hostFrom(records, headers);
   if (dnsProvider?.id === "nsone" && host?.id === "netlify") dnsProvider = { ...dnsProvider, id: "netlify", name: "Netlify", auto: true };
 
+  // Does their DNS provider let customers sign in and approve our records?
+  const { discover, supports } = await import("./domainconnect");
+  const dc = await discover(domain).catch(() => null);
+  const domainConnect = dc ? { providerId: dc.settings.providerId, providerName: dc.settings.providerName, supported: await supports(dc.settings) } : null;
+
   return {
     scannedAt: new Date().toISOString(),
     reachable: !!html,
@@ -217,6 +222,7 @@ export async function scanDomain(domain: string, siteId: string): Promise<ScanRe
     cloudflareProxied: !!headers?.get("cf-ray") && dnsProvider?.id === "cloudflare",
     scriptFound: html.includes(`data-site="${siteId}"`) || html.includes(`data-site='${siteId}'`),
     records,
+    domainConnect,
     error,
   };
 }

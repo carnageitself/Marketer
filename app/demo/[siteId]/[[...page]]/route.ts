@@ -1,5 +1,5 @@
 // app/demo/[siteId]/[[...page]]/route.ts
-// A realistic marketing site for a fictional product ("Acme Notes") with the
+// A realistic marketing site for a fictional product ("Brightnote") with the
 // real tracker on it, so a new account can see data arrive without touching
 // their own website. Deliberately has NO data-section attributes, so every
 // detection path in public/t.js gets exercised:
@@ -121,26 +121,26 @@ table.cmp{width:100%;border-collapse:collapse;margin-top:48px;font-size:15px;bac
 
 function layout(base: string, title: string, body: string, origin: string, siteId: string) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · Acme Notes</title>
-<meta name="description" content="Acme Notes turns scattered notes into a searchable knowledge base for your team.">
+<title>${esc(title)} · Brightnote</title>
+<meta name="description" content="Brightnote turns scattered notes into a searchable knowledge base for your team.">
 <script defer src="${origin}/t.js" data-site="${esc(siteId)}"></script>
 <style>${CSS}</style></head><body>
 <header class="top"><div class="c">
-  <a class="logo" href="${base}"><i>A</i>Acme Notes</a>
+  <a class="logo" href="${base}"><i>B</i>Brightnote</a>
   <nav><a href="${base}/features" data-spa>Features</a><a href="${base}/pricing">Pricing</a><a href="${base}/blog">Blog</a><a href="${base}#testimonials">Customers</a></nav>
   <div class="right"><a class="btn btn-g" href="${base}/pricing">Log in</a><a class="btn btn-p" href="${base}/thank-you">Start free trial</a></div>
 </div></header>
 ${body}
 <footer class="foot"><div class="c">
   <div class="cols">
-    <div><a class="logo" href="${base}"><i>A</i>Acme Notes</a><p>Your team&rsquo;s second brain. Notes, docs and tasks that link together.</p></div>
+    <div><a class="logo" href="${base}"><i>B</i>Brightnote</a><p>Your team&rsquo;s second brain. Notes, docs and tasks that link together.</p></div>
     <div><h4>Product</h4><a href="${base}/features" data-spa>Features</a><a href="${base}/pricing">Pricing</a><a href="${base}#integrations">Integrations</a></div>
-    <div><h4>Company</h4><a href="${base}/blog">Blog</a><a href="mailto:hi@acme.test">Contact</a><a href="https://github.com/acme" rel="noreferrer">GitHub</a></div>
+    <div><h4>Company</h4><a href="${base}/blog">Blog</a><a href="mailto:hello@brightnote.app">Contact</a><a href="https://github.com/brightnote" rel="noreferrer">GitHub</a></div>
     <div><h4>Resources</h4><a href="${base}#faq">FAQ</a><a href="${base}/blog/how-we-write">Writing guide</a></div>
     <div><h4>Get the newsletter</h4><p>One email a month. No spam.</p>
       <form onsubmit="event.preventDefault();this.innerHTML='<p style=&quot;color:#5eead4&quot;>Thanks, you&rsquo;re subscribed.</p>'" aria-label="Newsletter signup"><input type="email" placeholder="you@company.com" aria-label="Email"><button class="btn btn-b">Subscribe</button></form></div>
   </div>
-  <div class="legal"><span>&copy; 2026 Acme Notes, Inc.</span><span>Privacy &middot; Terms &middot; Security</span></div>
+  <div class="legal"><span>&copy; 2026 Brightnote, Inc.</span><span>Privacy &middot; Terms &middot; Security</span></div>
 </div></footer>
 <div class="pw-demo"><span><b>Pagewise demo site.</b> Clicks and scrolling here show up in your dashboard.</span><a href="/sites/${esc(siteId)}">Open dashboard &rarr;</a></div>
 <script>
@@ -149,7 +149,7 @@ ${body}
     var a = e.target.closest && e.target.closest('a[data-spa]');
     if (!a) return; e.preventDefault();
     history.pushState({}, '', a.getAttribute('href'));
-    document.title = 'Features · Acme Notes';
+    document.title = 'Features · Brightnote';
     document.querySelector('main').innerHTML = ${JSON.stringify(features(base))};
     window.scrollTo(0, 0);
   });
@@ -219,7 +219,7 @@ function page(base: string, parts: string[]): { title: string; body: string } {
   if (slug === "blog") return {
     title: "Blog",
     body: `<main><section class="pad"><div class="c">
-  <span class="eyebrow">Blog</span><h1>Notes on writing and thinking.</h1><p class="lead">Ideas from the Acme team on capturing knowledge and working faster.</p>
+  <span class="eyebrow">Blog</span><h1>Notes on writing and thinking.</h1><p class="lead">Ideas from the Brightnote team on capturing knowledge and working faster.</p>
   <div class="grid3">
     <a class="post" href="${base}/blog/how-we-write"><div class="img"></div><div class="t"><span class="tag">Writing</span><h3>How we write 10x faster</h3><p>The system our team uses to go from scattered notes to finished docs.</p></div></a>
     <a class="post" href="${base}/blog/how-we-write"><div class="img" style="background:linear-gradient(135deg,#bfdbfe,#3b82f6)"></div><div class="t"><span class="tag">Product</span><h3>Linking notes the right way</h3><p>Why backlinks beat folders for anything you want to find again.</p></div></a>
@@ -239,23 +239,23 @@ function page(base: string, parts: string[]): { title: string; body: string } {
       body: `<main><section id="article" class="pad"><div class="c article">
   <span class="tag">Writing</span>
   <h1 style="margin-top:18px">How we write 10x faster</h1>
-  <div class="meta"><span class="av" style="background:#0d9488">D</span><span><b style="color:var(--ink)">Dana Kim</b><br>Head of Content &middot; 6 min read</span></div>
+  <div class="meta"><span class="av" style="background:#0d9488">M</span><span><b style="color:var(--ink)">Maya Chen</b><br>Head of Content &middot; 6 min read</span></div>
   ${para.map(p => `<p>${p}</p>`).join("")}
   <h2>Start with links, not folders</h2>
   ${para.slice().reverse().map(p => `<p>${p}</p>`).join("")}
   <h2>Write the summary first</h2>
   ${para.map(p => `<p>${p}</p>`).join("")}
 </div></section>
-<section id="cta" class="pad"><div class="c"><div class="cta"><h2>Try Acme Notes</h2><p class="lead" style="margin:16px auto 0;color:#cbd5e1">The note-taking app built around links.</p>
+<section id="cta" class="pad"><div class="c"><div class="cta"><h2>Try Brightnote</h2><p class="lead" style="margin:16px auto 0;color:#cbd5e1">The note-taking app built around links.</p>
   <div class="btns"><a class="btn btn-b" href="${base}/pricing">See pricing</a><a class="btn btn-g" href="${base}/thank-you">Start free trial</a></div></div></div></section></main>`,
     };
   }
   if (slug === "features") return { title: "Features", body: `<main>${features(base)}</main>` };
 
   const testimonials = [
-    ["Changed how our whole team works. We stopped asking “where’s that doc?” in Slack.", "Dana Lee", "COO, Northwind", "#0d9488"],
-    ["Finally, one place for everything. Onboarding new hires takes days instead of weeks.", "Sam Patel", "Engineering Manager, Lumen", "#6366f1"],
-    ["The search is uncanny. I find notes I forgot I ever wrote.", "Ana Rossi", "Founder, Fieldwork", "#f59e0b"],
+    ["Changed how our whole team works. We stopped asking “where’s that doc?” in Slack.", "Priya Raman", "COO, Meridian Health", "#0d9488"],
+    ["Finally, one place for everything. Onboarding new hires takes days instead of weeks.", "Daniel Okafor", "Engineering Manager, Atlas Freight", "#6366f1"],
+    ["The search is uncanny. I find notes I forgot I ever wrote.", "Sofia Marín", "Founder, Beacon Studio", "#f59e0b"],
   ];
   const integrations = [
     ["Slack", "Save messages as notes", "#4a154b"], ["Google Drive", "Link docs and sheets", "#1a73e8"], ["GitHub", "Reference issues and PRs", "#24292f"], ["Figma", "Embed live designs", "#a259ff"],
@@ -267,9 +267,9 @@ function page(base: string, parts: string[]): { title: string; body: string } {
 <section id="hero" class="hero center"><div class="c">
   <a class="pill" href="${base}/features" data-spa><b>New</b>AI search across every note &rarr;</a>
   <h1>Your second brain, finally organised.</h1>
-  <p class="lead">Acme Notes turns scattered notes, docs and links into one searchable knowledge base your whole team can use.</p>
+  <p class="lead">Brightnote turns scattered notes, docs and links into one searchable knowledge base your whole team can use.</p>
   <div class="btns" style="justify-content:center"><a class="btn btn-p" href="${base}/thank-you">Start free trial</a><a class="btn btn-g" href="${base}/pricing">See pricing</a></div>
-  <div class="logos"><span>Trusted by 20,000 teams, including</span><span>Northwind</span><span>Lumen</span><span>Fieldwork</span><span>Parallel</span><span>Kestrel</span></div>
+  <div class="logos"><span>Trusted by 20,000 teams, including</span><span>Meridian Health</span><span>Atlas Freight</span><span>Beacon Studio</span><span>Halcyon Labs</span><span>Summit Capital</span></div>
   <div class="app"><div class="bar"><i></i><i></i><i></i></div><div class="body">
     <div class="side"><div class="on">All notes</div><div>Projects</div><div>Meetings</div><div>Decisions</div><div>Shared with me</div></div>
     <div class="list"><div class="on"><b>Q3 launch plan</b>Linked to 6 notes &middot; 2h ago</div><div><b>Pricing research</b>Linked to 3 notes &middot; yesterday</div><div><b>Weekly sync, Oct 9</b>Meeting &middot; 3 days ago</div><div><b>Hiring rubric</b>Shared &middot; last week</div></div>
@@ -281,7 +281,7 @@ function page(base: string, parts: string[]): { title: string; body: string } {
   <span class="eyebrow">How it works</span><h2>From scattered to searchable in three steps.</h2>
   <div class="grid3" style="text-align:left">
     <div class="card"><div class="num">1</div><h3>Capture</h3><p>Write notes, clip pages, or forward emails. Everything lands in one inbox, on any device.</p></div>
-    <div class="card"><div class="num">2</div><h3>Link</h3><p>Connect notes to projects, people and decisions. Acme suggests links as you type.</p></div>
+    <div class="card"><div class="num">2</div><h3>Link</h3><p>Connect notes to projects, people and decisions. Brightnote suggests links as you type.</p></div>
     <div class="card"><div class="num">3</div><h3>Find</h3><p>Ask a question in plain English and get the answer, with the notes it came from.</p></div>
   </div>
 </div></section>

@@ -10,6 +10,8 @@
 //   active time time the tab was visible, summed over the visit's pages.
 //   bounce      one page, no clicks, under 10 s of active time.
 //   conversion  the visit matched any of the site's goals.
+//   engaged     30 s+ of active time, or 2+ pages, or a conversion.
+//   read-through a page view scrolled to at least 75% of the page.
 import "server-only";
 import { q } from "./db";
 import type { Goal } from "./sites";
@@ -79,7 +81,11 @@ async function kpis(siteId: string, from: string, to: string, goals: Goal[]) {
        coalesce(sum(page_count), 0)::int as pageviews,
        coalesce(avg(active_ms), 0)::float8 as avg_active_ms,
        count(*) filter (where bounce)::int as bounces,
-       count(*) filter (where converted)::int as conversions
+       count(*) filter (where converted)::int as conversions,
+       count(*) filter (where active_ms >= 30000 or page_count >= 2 or converted)::int as engaged,
+       count(*) filter (where exists (select 1 from clicks c where c.visit_id = vv.id))::int as clicked,
+       (select count(*)::int from pageviews p where p.visit_id in (select id from vv)) as views_seen,
+       (select count(*)::int from pageviews p where p.visit_id in (select id from vv) and p.max_scroll >= 75) as views_read
      from vv`,
     params,
   );
@@ -91,7 +97,41 @@ async function kpis(siteId: string, from: string, to: string, goals: Goal[]) {
     bounceRate: pct(n(r.bounces), visits),
     conversions: n(r.conversions),
     conversionRate: pct(n(r.conversions), visits),
+    engagedRate: pct(n(r.engaged), visits),
+    clickRate: pct(n(r.clicked), visits),
+    readThroughRate: pct(n(r.views_read), n(r.views_seen)),
   };
+}
+
+/** How visits that converted differ from the rest: the "what do buyers do" comparison. */
+async function converters(siteId: string, r: Range, goals: Goal[]) {
+  const params: unknown[] = [siteId, r.from, r.to];
+  const cte = visitsCte(goals, params);
+  const rows = await q<Row>(
+    `with ${cte},
+     scroll as (select visit_id, avg(max_scroll) as s from pageviews where visit_id in (select id from vv) group by 1)
+     select converted, count(*)::int as visits,
+       coalesce(avg(page_count), 0)::float8 as pages, coalesce(avg(active_ms), 0)::float8 as active_ms,
+       coalesce(avg(scroll.s), 0)::float8 as scroll,
+       count(*) filter (where exists (select 1 from clicks c where c.visit_id = vv.id))::int as clicked,
+       count(*) filter (where (select count(*) from visits x where x.site_id = $1 and x.visitor_key = vv.visitor_key and x.started_at < vv.started_at) > 0)::int as returning,
+       mode() within group (order by coalesce(vv.source_name, 'Direct')) as top_source,
+       mode() within group (order by coalesce(vv.entry_path, '/')) as top_entry,
+       mode() within group (order by coalesce(vv.device, 'unknown')) as top_device
+     from vv left join scroll on scroll.visit_id = vv.id
+     group by converted`,
+    params,
+  );
+  const side = (conv: boolean) => {
+    const x = rows.find(row => !!row.converted === conv);
+    const visits = n(x?.visits);
+    return visits ? {
+      visits, pages: Math.round(n(x!.pages) * 10) / 10, activeMs: Math.round(n(x!.active_ms)), scroll: Math.round(n(x!.scroll)),
+      clickRate: pct(n(x!.clicked), visits), returningRate: pct(n(x!.returning), visits),
+      topSource: String(x!.top_source ?? ""), topEntry: String(x!.top_entry ?? ""), topDevice: String(x!.top_device ?? ""),
+    } : null;
+  };
+  return { converted: side(true), others: side(false) };
 }
 
 export async function overview(siteId: string, r: Range, goals: Goal[]) {
@@ -112,7 +152,7 @@ export async function overview(siteId: string, r: Range, goals: Goal[]) {
   );
   const [live] = await q<Row>(
     `select count(*)::int as n from visits where site_id = $1 and last_seen_at > now() - interval '5 minutes'`, [siteId]);
-  return { kpis: cur, previous: prev, series, live: n(live.n) };
+  return { kpis: cur, previous: prev, series, live: n(live.n), converters: await converters(siteId, r, goals) };
 }
 
 // ── sources & audience ──────────────────────────────────────────────────────
@@ -278,7 +318,9 @@ export async function visitorsList(siteId: string, r: Range, goals: Goal[]) {
 }
 
 export async function journey(siteId: string, visitId: string, goals: Goal[]) {
-  const params: unknown[] = [siteId, "-infinity", "infinity"];
+  // No date window: real dates rather than '-infinity'/'infinity', which
+  // postgres.js can't serialize (it runs every timestamp through new Date()).
+  const params: unknown[] = [siteId, "1970-01-01T00:00:00Z", "9999-12-31T00:00:00Z"];
   const cte = visitsCte(goals, params);
   params.push(visitId);
   const [visit] = await q<Row>(`with ${cte} select * from vv where id = $${params.length}`, params);
@@ -346,7 +388,8 @@ export async function insights(siteId: string, r: Range, goals: Goal[]): Promise
         tab: "sections",
       });
     }
-    const ignored = secs.filter(s => s.seen >= 10 && (s.engagedRate ?? 100) < 25 && s.index > 0);
+    // Headers, footers and nav bars are glanced at by design, so they never count as "skimmed".
+    const ignored = secs.filter(s => s.seen >= 10 && (s.engagedRate ?? 100) < 25 && s.index > 0 && !/^(footer|header|navigation)$/i.test(s.name));
     if (ignored[0]) out.push({
       tone: "info",
       title: `“${ignored[0].name}” is skimmed, not read`,
@@ -379,6 +422,26 @@ export async function insights(siteId: string, r: Range, goals: Goal[]): Promise
     title: `${leaky.path} is where visits end`,
     detail: `${Math.round((100 * n(leaky.exits)) / n(leaky.views))}% of its views are the last page of the visit. Add a clear next step.`, tab: "pages",
   });
+
+  // Behaviour across the whole site, once there's enough to judge.
+  if (k.visits >= 30) {
+    const c = ov.converters.converted, o = ov.converters.others;
+    if (c && o && o.pages > 0 && c.pages / o.pages >= 1.5) out.push({
+      tone: "good",
+      title: `Visitors who explore convert: ${Math.round((c.pages / o.pages) * 10) / 10}× more pages`,
+      detail: `Converters view ${c.pages} pages per visit vs ${o.pages} for everyone else. Link your landing pages to the pages converters read next.`, tab: "pages",
+    });
+    if (k.clickRate !== null && k.clickRate < 20) out.push({
+      tone: "bad",
+      title: `Only ${k.clickRate}% of visits click anything`,
+      detail: "Most visitors read and leave. Make the next step obvious: one clear button near the top of your busiest pages.", tab: "pages",
+    });
+    if (k.readThroughRate !== null && k.readThroughRate < 20) out.push({
+      tone: "bad",
+      title: `Only ${k.readThroughRate}% of page views reach the end`,
+      detail: "Content and calls to action near the bottom of your pages are rarely seen. Move the important parts up.", tab: "sections",
+    });
+  }
 
   if (k.conversions === 0 && k.visits >= 30) out.push({
     tone: "info",
