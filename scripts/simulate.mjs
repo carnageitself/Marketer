@@ -87,7 +87,13 @@ async function visit(i) {
     const convP = (readTestimonials ? 0.34 : 0.07) + (path === "/pricing" ? 0.12 : 0) + (src.q?.includes("newsletter") ? 0.08 : 0);
     if (chance(convP)) {
       events.push({ t: "click", pv, path, label: path === "/pricing" ? "Buy Pro" : "Start free trial", kind: "internal", href: `${base}/thank-you`, tpath: "/thank-you", sec: path === "/pricing" ? "plans" : "hero", ts: t });
-      events.push({ t: "pv", pv: uuid(), path: "/thank-you", title: "Welcome", prev: path, q: "", r: "", ts: t + 800 });
+      const thanks = uuid();
+      events.push({ t: "pv", pv: thanks, path: "/thank-you", title: "Welcome", prev: path, q: path === "/pricing" ? "?plan=pro" : "", r: "", ts: t + 800 });
+      // Buying Pro reports a purchase (as the demo's thank-you page does); some buyers pay in euros.
+      if (path === "/pricing") {
+        const eur = chance(0.2);
+        events.push({ t: "rev", pv: thanks, path: "/thank-you", amt: eur ? 89 : 96, cur: eur ? "EUR" : "USD", oid: `BN-${uuid().slice(0, 8)}`, src: "datalayer", ts: t + 900 });
+      }
       converted = true;
       break;
     }

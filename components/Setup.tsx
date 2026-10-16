@@ -19,6 +19,7 @@ interface SiteT {
     host?: { id: string; name: string } | null; platform?: { id: string; name: string } | null;
     records?: { a: string[]; cname: string[]; wwwCname: string[] };
     domainConnect?: { providerId: string; providerName: string; supported: boolean } | null;
+    commerce?: { found: string[]; auto: boolean };
   };
   dns: { subdomain?: string; cnameVerifiedAt?: string; worker?: { script: string; installedAt: string }; log?: { at: string; text: string; ok: boolean }[] };
 }
@@ -206,6 +207,27 @@ export default function Setup({ initial, email, account, role }: { initial: Info
               </div>
             )}
           </Step>
+
+          {/* 4 — revenue */}
+          <Step n={4} done={!!scan.commerce?.auto} title="Track revenue" action={<Badge>Optional</Badge>}>
+            {scan.commerce?.auto ? (
+              <p className="text-[13px] leading-relaxed">
+                <b>Automatic.</b> We found {scan.commerce.found.filter(f => ["Shopify", "WooCommerce", "Google Tag Manager", "Google Analytics"].includes(f)).join(" and ")} on your site,
+                so purchase amounts are picked up from your order pages without any setup. Only the amount, currency and order number are read.
+              </p>
+            ) : (
+              <p className="text-[13px] leading-relaxed">
+                {scan.commerce?.found.length ? <>We found {scan.commerce.found.join(", ")}, which doesn&apos;t tell us order amounts on its own. </> : null}
+                Tell us what a conversion is worth (for example, a demo request worth $500) and revenue shows up right away.
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link href={`/sites/${site.id}?tab=settings`} className="inline-flex h-9 items-center gap-2 rounded-lg border border-line bg-panel px-3.5 text-[13px] font-medium shadow-card hover:bg-panel-2">
+                {scan.commerce?.auto ? "Set the reporting currency" : "Add goal values"}<Icon name="arrowRight" size={14} />
+              </Link>
+            </div>
+            <p className="mt-3 text-[12px] text-muted">Developers can also send exact amounts: <code className="font-mono">pagewise(&apos;track&apos;, &apos;Purchase&apos;, &#123; value: 49, currency: &apos;USD&apos; &#125;)</code></p>
+          </Step>
         </div>
 
         <aside className="min-w-0 space-y-6 xl:sticky xl:top-8">
@@ -228,7 +250,7 @@ export default function Setup({ initial, email, account, role }: { initial: Info
 
           <div className="rounded-xl border border-line bg-panel p-5 shadow-card">
             <div className="flex items-center gap-2 text-[13.5px] font-semibold"><Icon name="play" size={14} className="text-accent" />Just trying it out?</div>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-muted">Our demo website already carries this site&apos;s tag. Click around, scroll, and watch the data arrive in your dashboard.</p>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-muted">Click around our demo website, then switch your dashboard to <b>Demo data</b> to watch it arrive. It never mixes with your real numbers.</p>
             <a className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-line bg-panel text-[13px] font-medium shadow-card hover:bg-panel-2" href={`/demo/${site.id}`} target="_blank" rel="noreferrer">
               Open demo website<Icon name="external" size={14} />
             </a>

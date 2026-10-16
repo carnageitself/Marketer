@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { q } from "@/lib/db";
 import { appOrigin, patchSite, requireSite, setupInfo, type Goal } from "@/lib/sites";
+import { CURRENCIES } from "@/lib/fx";
 
 export const runtime = "nodejs";
 type Ctx = { params: Promise<{ id: string }> };
@@ -15,7 +16,7 @@ export async function GET(req: Request, { params }: Ctx) {
 export async function PATCH(req: Request, { params }: Ctx) {
   const r = await requireSite((await params).id, "editor");
   if (r instanceof NextResponse) return r;
-  const body = await req.json().catch(() => ({})) as { goals?: Goal[]; settings?: { persistentIds?: boolean } };
+  const body = await req.json().catch(() => ({})) as { goals?: Goal[]; settings?: { persistentIds?: boolean }; currency?: string };
   const fields: Parameters<typeof patchSite>[1] = {};
   if (Array.isArray(body.goals)) {
     const goals: Goal[] = [];
@@ -26,11 +27,16 @@ export async function PATCH(req: Request, { params }: Ctx) {
         if (!pattern) continue;
         try { new RegExp(pattern, "i"); } catch { return NextResponse.json({ error: `“${pattern}” isn't a valid pattern` }, { status: 400 }); }
       }
-      goals.push({ id: String(g.id || `g_${goals.length}_${Date.now()}`).slice(0, 40), type: g.type, pattern, label: String(g.label ?? "").slice(0, 120) || pattern });
+      const value = Math.min(1_000_000, Math.max(0, Math.round(Number(g.value) * 100) / 100 || 0));
+      goals.push({ id: String(g.id || `g_${goals.length}_${Date.now()}`).slice(0, 40), type: g.type, pattern, label: String(g.label ?? "").slice(0, 120) || pattern, ...(value ? { value } : {}) });
     }
     fields.goals = goals;
   }
   if (body.settings) fields.settings = { ...r.site.settings, persistentIds: !!body.settings.persistentIds };
+  if (body.currency !== undefined) {
+    if (!(CURRENCIES as readonly string[]).includes(body.currency)) return NextResponse.json({ error: "Pick a supported currency" }, { status: 400 });
+    fields.currency = body.currency;
+  }
   return NextResponse.json({ site: await patchSite(r.site.id, fields) });
 }
 

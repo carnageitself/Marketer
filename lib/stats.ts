@@ -12,9 +12,13 @@
 //   conversion  the visit matched any of the site's goals.
 //   engaged     30 s+ of active time, or 2+ pages, or a conversion.
 //   read-through a page view scrolled to at least 75% of the page.
+//   revenue     tracked purchases (converted to the site's currency) if the
+//               visit has any, otherwise the value of the goals it reached.
+//               A purchase also counts as a conversion.
 import "server-only";
 import { q } from "./db";
 import type { Goal } from "./sites";
+import { money as formatMoney } from "./currency";
 
 export type RangeKey = "24h" | "7d" | "30d" | "90d";
 export interface Range { from: string; to: string; prevFrom: string; key: RangeKey; bucket: "hour" | "day" }
@@ -34,29 +38,42 @@ export function rangeOf(key: string | null): Range {
 
 // ── goals → SQL ─────────────────────────────────────────────────────────────
 
-/** A boolean SQL expression over visit alias `v`, with its parameters appended to `params`. */
-function goalExpr(goals: Goal[], params: unknown[]): string {
-  const parts: string[] = [];
+/** One boolean SQL expression per goal over visit alias `v` (with its value), parameters appended to `params`. */
+function goalConds(goals: Goal[], params: unknown[]): { cond: string; value: number }[] {
+  const out: { cond: string; value: number }[] = [];
   for (const g of goals) {
+    const value = Number(g.value) > 0 ? Number(g.value) : 0;
     if (g.type === "app_link") {
-      parts.push(`exists (select 1 from clicks c where c.visit_id = v.id and c.kind = 'app')`);
+      out.push({ cond: `exists (select 1 from clicks c where c.visit_id = v.id and c.kind = 'app')`, value });
       continue;
     }
     if (!g.pattern) continue;
     params.push(g.pattern);
     const p = `$${params.length}`;
-    if (g.type === "click_text") parts.push(`exists (select 1 from clicks c where c.visit_id = v.id and (c.label ~* ${p} or c.href ~* ${p}))`);
-    if (g.type === "path") parts.push(`exists (select 1 from pageviews p where p.visit_id = v.id and p.path ~* ${p})`);
-    if (g.type === "event") parts.push(`exists (select 1 from custom_events e where e.visit_id = v.id and e.name ~* ${p})`);
+    if (g.type === "click_text") out.push({ cond: `exists (select 1 from clicks c where c.visit_id = v.id and (c.label ~* ${p} or c.href ~* ${p}))`, value });
+    if (g.type === "path") out.push({ cond: `exists (select 1 from pageviews p where p.visit_id = v.id and p.path ~* ${p})`, value });
+    if (g.type === "event") out.push({ cond: `exists (select 1 from custom_events e where e.visit_id = v.id and e.name ~* ${p})`, value });
   }
-  return parts.length ? `(${parts.join(" or ")})` : "false";
+  return out;
 }
 
-/** The enriched-visits CTE every report builds on. Params: $1 site, $2 from, $3 to, then goal patterns. */
-function visitsCte(goals: Goal[], params: unknown[]) {
+/** USD → site currency multiplier for revenue columns (1 when the site reports in USD). */
+export interface Money { currency: string; fx: number }
+
+/**
+ * The enriched-visits CTE every report builds on. Params: $1 site, $2 from, $3 to,
+ * then goal patterns. `revenue` is in the site's currency when `money` is given.
+ */
+function visitsCte(goals: Goal[], params: unknown[], money: Money = { currency: "USD", fx: 1 }) {
+  const conds = goalConds(goals, params);
+  params.push(money.fx);
+  const fx = `$${params.length}::float8`;
+  const purchased = `exists (select 1 from revenue_events r where r.visit_id = v.id)`;
+  const goalValue = conds.some(c => c.value) ? `greatest(0, ${conds.filter(c => c.value).map(c => `case when ${c.cond} then ${c.value} else 0 end`).join(", ")})` : "0";
   return `vv as (
     select v.*,
-      ${goalExpr(goals, params)} as converted,
+      (${[...conds.map(c => c.cond), purchased].join(" or ")}) as converted,
+      coalesce(nullif((select sum(r.amount_usd) from revenue_events r where r.visit_id = v.id), 0) * ${fx}, ${goalValue}, 0)::float8 as revenue,
       coalesce((select sum(p.time_ms) from pageviews p where p.visit_id = v.id), 0)::int as active_ms,
       (v.page_count <= 1
         and not exists (select 1 from clicks c where c.visit_id = v.id)
@@ -72,9 +89,9 @@ const n = (v: unknown) => Number(v ?? 0) || 0;
 
 // ── overview ────────────────────────────────────────────────────────────────
 
-async function kpis(siteId: string, from: string, to: string, goals: Goal[]) {
+async function kpis(siteId: string, from: string, to: string, goals: Goal[], money?: Money) {
   const params: unknown[] = [siteId, from, to];
-  const cte = visitsCte(goals, params);
+  const cte = visitsCte(goals, params, money);
   const [r] = await q<Row>(
     `with ${cte}
      select count(distinct visitor_key)::int as visitors, count(*)::int as visits,
@@ -85,7 +102,9 @@ async function kpis(siteId: string, from: string, to: string, goals: Goal[]) {
        count(*) filter (where active_ms >= 30000 or page_count >= 2 or converted)::int as engaged,
        count(*) filter (where exists (select 1 from clicks c where c.visit_id = vv.id))::int as clicked,
        (select count(*)::int from pageviews p where p.visit_id in (select id from vv)) as views_seen,
-       (select count(*)::int from pageviews p where p.visit_id in (select id from vv) and p.max_scroll >= 75) as views_read
+       (select count(*)::int from pageviews p where p.visit_id in (select id from vv) and p.max_scroll >= 75) as views_read,
+       coalesce(sum(revenue), 0)::float8 as revenue,
+       count(*) filter (where revenue > 0)::int as paying
      from vv`,
     params,
   );
@@ -100,6 +119,9 @@ async function kpis(siteId: string, from: string, to: string, goals: Goal[]) {
     engagedRate: pct(n(r.engaged), visits),
     clickRate: pct(n(r.clicked), visits),
     readThroughRate: pct(n(r.views_read), n(r.views_seen)),
+    revenue: Math.round(n(r.revenue) * 100) / 100,
+    revenuePerVisitor: n(r.visitors) ? Math.round((n(r.revenue) / n(r.visitors)) * 100) / 100 : 0,
+    avgOrderValue: n(r.paying) ? Math.round((n(r.revenue) / n(r.paying)) * 100) / 100 : 0,
   };
 }
 
@@ -134,37 +156,46 @@ async function converters(siteId: string, r: Range, goals: Goal[]) {
   return { converted: side(true), others: side(false) };
 }
 
-export async function overview(siteId: string, r: Range, goals: Goal[]) {
-  const [cur, prev] = await Promise.all([kpis(siteId, r.from, r.to, goals), kpis(siteId, r.prevFrom, r.from, goals)]);
+export async function overview(siteId: string, r: Range, goals: Goal[], money?: Money) {
   const params: unknown[] = [siteId, r.from, r.to];
-  const cte = visitsCte(goals, params);
+  const cte = visitsCte(goals, params, money);
   const step = r.bucket === "hour" ? "1 hour" : "1 day";
-  const series = await q<Row>(
-    `with ${cte},
-     buckets as (select generate_series(date_trunc('${r.bucket}', $2::timestamptz), $3::timestamptz - interval '1 second', interval '${step}') as b)
-     select to_char(b.b at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as t,
-       count(distinct vv.visitor_key)::int as visitors, count(vv.id)::int as visits,
-       coalesce(sum(vv.page_count), 0)::int as pageviews,
-       count(vv.id) filter (where vv.converted)::int as conversions
-     from buckets b left join vv on date_trunc('${r.bucket}', vv.started_at) = b.b
-     group by b.b order by b.b`,
-    params,
-  );
-  const [live] = await q<Row>(
-    `select count(*)::int as n from visits where site_id = $1 and last_seen_at > now() - interval '5 minutes'`, [siteId]);
-  return { kpis: cur, previous: prev, series, live: n(live.n), converters: await converters(siteId, r, goals) };
+  // Independent queries run together, so the overview waits for the slowest one, not the sum.
+  const [cur, prev, series, [live], conv, anySale] = await Promise.all([
+    kpis(siteId, r.from, r.to, goals, money),
+    kpis(siteId, r.prevFrom, r.from, goals, money),
+    q<Row>(
+      `with ${cte},
+       buckets as (select generate_series(date_trunc('${r.bucket}', $2::timestamptz), $3::timestamptz - interval '1 second', interval '${step}') as b)
+       select to_char(b.b at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as t,
+         count(distinct vv.visitor_key)::int as visitors, count(vv.id)::int as visits,
+         coalesce(sum(vv.page_count), 0)::int as pageviews,
+         count(vv.id) filter (where vv.converted)::int as conversions,
+         round(coalesce(sum(vv.revenue), 0)::numeric, 2)::float8 as revenue
+       from buckets b left join vv on date_trunc('${r.bucket}', vv.started_at) = b.b
+       group by b.b order by b.b`,
+      params,
+    ),
+    q<Row>(`select count(*)::int as n from visits where site_id = $1 and last_seen_at > now() - interval '5 minutes'`, [siteId]),
+    converters(siteId, r, goals),
+    q<Row>("select 1 from revenue_events where site_id = $1 limit 1", [siteId]),
+  ]);
+  // Revenue is "measured" once any goal has a value or a purchase has ever been recorded.
+  const measured = goals.some(g => Number(g.value) > 0) || anySale.length > 0;
+  return { kpis: cur, previous: prev, series, live: n(live.n), converters: conv, revenue: { measured, currency: money?.currency ?? "USD" } };
 }
 
 // ── sources & audience ──────────────────────────────────────────────────────
 
-export async function sources(siteId: string, r: Range, goals: Goal[]) {
+export async function sources(siteId: string, r: Range, goals: Goal[], money?: Money) {
   const params: unknown[] = [siteId, r.from, r.to];
-  const cte = visitsCte(goals, params);
+  const cte = visitsCte(goals, params, money);
   const by = (expr: string, where = "true", limit = 50) => q<Row>(
     `with ${cte}
      select ${expr} as key, count(*)::int as visits, count(distinct visitor_key)::int as visitors,
        count(*) filter (where bounce)::int as bounces, count(*) filter (where converted)::int as conversions,
-       coalesce(avg(active_ms), 0)::float8 as avg_active_ms
+       coalesce(avg(active_ms), 0)::float8 as avg_active_ms,
+       round(coalesce(sum(revenue), 0)::numeric, 2)::float8 as revenue
      from vv where ${where} group by 1 order by visits desc limit ${limit}`,
     params,
   );
@@ -244,9 +275,9 @@ export async function sectionPages(siteId: string, r: Range) {
     [siteId, r.from, r.to]);
 }
 
-export async function sections(siteId: string, r: Range, path: string, goals: Goal[]) {
+export async function sections(siteId: string, r: Range, path: string, goals: Goal[], money?: Money) {
   const params: unknown[] = [siteId, r.from, r.to];
-  const cte = visitsCte(goals, params);
+  const cte = visitsCte(goals, params, money);
   params.push(path);
   const pathP = `$${params.length}`;
   const rows = await q<Row>(
@@ -277,6 +308,8 @@ export async function sections(siteId: string, r: Range, path: string, goals: Go
        (select count(*)::int from readers r where r.section_id = per.section_id) as reader_visits,
        (select count(*)::int from readers r join vv on vv.id = r.visit_id where r.section_id = per.section_id and vv.converted) as reader_conversions,
        (select count(*)::int from vv where vv.id in (select visit_id from page_visits) and vv.converted) as page_conversions,
+       (select coalesce(sum(vv.revenue), 0)::float8 from readers r join vv on vv.id = r.visit_id where r.section_id = per.section_id) as reader_revenue,
+       (select coalesce(sum(vv.revenue), 0)::float8 from vv where vv.id in (select visit_id from page_visits)) as page_revenue,
        (select count(*)::int from clicks c join vv on vv.id = c.visit_id where c.path = ${pathP} and c.section_id = per.section_id) as clicks
      from per order by idx, section_id`,
     params,
@@ -296,6 +329,10 @@ export async function sections(siteId: string, r: Range, path: string, goals: Go
       readers, readerConvRate: rRate === null ? null : Math.round(rRate * 1000) / 10,
       nonReaders, nonReaderConvRate: nRate === null ? null : Math.round(nRate * 1000) / 10,
       lift: rRate !== null && nRate !== null && nRate > 0 ? Math.round((rRate / nRate) * 10) / 10 : null,
+      // Revenue per visit for readers vs everyone else on the page (association, not proof of cause).
+      readerRevPerVisit: readers >= MIN ? Math.round((n(s.reader_revenue) / readers) * 100) / 100 : null,
+      nonReaderRevPerVisit: nonReaders >= MIN ? Math.round(((n(s.page_revenue) - n(s.reader_revenue)) / nonReaders) * 100) / 100 : null,
+      pageVisits: n(s.page_visits),
     };
   });
 }
@@ -348,9 +385,11 @@ export async function journey(siteId: string, visitId: string, goals: Goal[]) {
 
 export interface Insight { tone: "good" | "bad" | "info"; title: string; detail: string; tab?: string }
 
-export async function insights(siteId: string, r: Range, goals: Goal[]): Promise<Insight[]> {
+export async function insights(siteId: string, r: Range, goals: Goal[], money?: Money): Promise<Insight[]> {
   const out: Insight[] = [];
-  const [ov, src, pg, sp] = await Promise.all([overview(siteId, r, goals), sources(siteId, r, goals), pages(siteId, r), sectionPages(siteId, r)]);
+  const [ov, src, pg, sp] = await Promise.all([overview(siteId, r, goals, money), sources(siteId, r, goals, money), pages(siteId, r), sectionPages(siteId, r)]);
+  const cash = (v: number) => formatMoney(v, money?.currency);
+  const perMonth = 30 / Math.max(1, (Date.parse(r.to) - Date.parse(r.from)) / 86_400_000);
   const k = ov.kpis, prev = ov.previous;
   if (k.visits === 0) return [{ tone: "info", title: "Waiting for your first visitors", detail: "As soon as people visit your site, insights appear here automatically." }];
 
@@ -366,7 +405,18 @@ export async function insights(siteId: string, r: Range, goals: Goal[]): Promise
   // Section reading funnel + money sections on the busiest page with section data.
   const top = sp[0];
   if (top) {
-    const secs = (await sections(siteId, r, top.path as string, goals)).filter(s => s.seen > 0);
+    const secs = (await sections(siteId, r, top.path as string, goals, money)).filter(s => s.seen > 0);
+    // The money opportunity, ranked first: a section whose readers spend more but that few reach.
+    const opp = secs
+      .filter(s => s.readerRevPerVisit !== null && s.nonReaderRevPerVisit !== null && (s.reach ?? 100) < 70)
+      .map(s => ({ s, gain: 0.1 * s.pageVisits * (s.readerRevPerVisit! - s.nonReaderRevPerVisit!) * perMonth }))
+      .sort((a, b) => b.gain - a.gain)[0];
+    if (opp && opp.gain >= 1) out.push({
+      tone: "good",
+      title: `About ${cash(opp.gain)} a month more if 10% more visitors reach “${opp.s.name}”`,
+      detail: `Visitors who read it bring in ${cash(opp.s.readerRevPerVisit!)} per visit vs ${cash(opp.s.nonReaderRevPerVisit!)} for those who don't, but only ${opp.s.reach}% of views on ${top.path} reach it. (Based on how readers behave, not proof it causes the sale.)`,
+      tab: "sections",
+    });
     let worst: { from: string; to: string; a: number; b: number } | null = null;
     for (let i = 1; i < secs.length; i++) {
       const a = secs[i - 1].reach ?? 0, b = secs[i].reach ?? 0;
@@ -378,9 +428,9 @@ export async function insights(siteId: string, r: Range, goals: Goal[]): Promise
       detail: `${worst.a}% of page views see “${worst.from}”, but only ${worst.b}% get to “${worst.to}”. Tighten that section or move your call-to-action above it.`,
       tab: "sections",
     });
-    const money = secs.filter(s => s.lift !== null && s.readers >= 5 && s.nonReaders >= 5).sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0));
-    if (money[0] && (money[0].lift ?? 0) >= 1.3) {
-      const m = money[0];
+    const lifters = secs.filter(s => s.lift !== null && s.readers >= 5 && s.nonReaders >= 5).sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0));
+    if (lifters[0] && (lifters[0].lift ?? 0) >= 1.3) {
+      const m = lifters[0];
       out.push({
         tone: "good",
         title: `“${m.name}” makes people convert ${m.lift}× more`,
@@ -421,6 +471,14 @@ export async function insights(siteId: string, r: Range, goals: Goal[]): Promise
     tone: "bad",
     title: `${leaky.path} is where visits end`,
     detail: `${Math.round((100 * n(leaky.exits)) / n(leaky.views))}% of its views are the last page of the visit. Add a clear next step.`, tab: "pages",
+  });
+
+  // The source that earns the most per visit.
+  const earner = src.sources.filter(x => n(x.visits) >= 10 && n(x.revenue) > 0).sort((a, b) => n(b.revenue) / n(b.visits) - n(a.revenue) / n(a.visits))[0];
+  if (earner && k.revenue > 0 && n(earner.revenue) / n(earner.visits) > (k.revenue / k.visits) * 1.3) out.push({
+    tone: "good",
+    title: `${earner.key} visitors are worth ${cash(n(earner.revenue) / n(earner.visits))} each`,
+    detail: `That's ${Math.round(((n(earner.revenue) / n(earner.visits)) / (k.revenue / k.visits)) * 10) / 10}× your average of ${cash(k.revenue / k.visits)} per visit.`, tab: "sources",
   });
 
   // Behaviour across the whole site, once there's enough to judge.

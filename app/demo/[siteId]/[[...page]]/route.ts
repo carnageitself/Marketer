@@ -8,7 +8,7 @@
 //   /features                 → reached by an SPA-style pushState
 // Section ids and paths match scripts/simulate.mjs, so simulated and real
 // visits land in the same sections.
-import { appOrigin, siteAccess } from "@/lib/sites";
+import { appOrigin, demoSiteOf, siteAccess } from "@/lib/sites";
 import { currentUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -119,11 +119,11 @@ table.cmp{width:100%;border-collapse:collapse;margin-top:48px;font-size:15px;bac
   .pad{padding:80px 0}.cta{padding:56px 24px}.pw-demo span{display:none}
 }`;
 
-function layout(base: string, title: string, body: string, origin: string, siteId: string) {
+function layout(base: string, title: string, body: string, origin: string, siteId: string, demoId: string) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · Brightnote</title>
 <meta name="description" content="Brightnote turns scattered notes into a searchable knowledge base for your team.">
-<script defer src="${origin}/t.js" data-site="${esc(siteId)}"></script>
+<script defer src="${origin}/t.js" data-site="${esc(demoId)}" data-base="${base}"></script>
 <style>${CSS}</style></head><body>
 <header class="top"><div class="c">
   <a class="logo" href="${base}"><i>B</i>Brightnote</a>
@@ -142,7 +142,7 @@ ${body}
   </div>
   <div class="legal"><span>&copy; 2026 Brightnote, Inc.</span><span>Privacy &middot; Terms &middot; Security</span></div>
 </div></footer>
-<div class="pw-demo"><span><b>Pagewise demo site.</b> Clicks and scrolling here show up in your dashboard.</span><a href="/sites/${esc(siteId)}">Open dashboard &rarr;</a></div>
+<div class="pw-demo"><span><b>Pagewise demo site.</b> Clicks and scrolling here show up under <i>Demo data</i>, never in your real numbers.</span><a href="/sites/${esc(siteId)}?view=demo">Open dashboard &rarr;</a></div>
 <script>
   // Fake single-page-app navigation for the Features links.
   document.addEventListener('click', function (e) {
@@ -183,7 +183,7 @@ function page(base: string, parts: string[]): { title: string; body: string } {
     <div class="plan"><h3>Free</h3><p>For individuals getting organised.</p><div class="price">$0<small> / forever</small></div>
       <ul><li>Unlimited notes</li><li>2 devices</li><li>7-day history</li></ul><a class="btn btn-g" href="${base}/thank-you">Get started</a></div>
     <div class="plan hot"><h3>Pro</h3><p>For professionals who live in their notes.</p><div class="price">$8<small> / month</small></div>
-      <ul><li>Everything in Free</li><li>Unlimited devices</li><li>AI search</li><li>Full version history</li></ul><a class="btn btn-b" href="${base}/thank-you">Buy Pro</a></div>
+      <ul><li>Everything in Free</li><li>Unlimited devices</li><li>AI search</li><li>Full version history</li></ul><a class="btn btn-b" href="${base}/thank-you?plan=pro">Buy Pro</a></div>
     <div class="plan"><h3>Team</h3><p>For teams sharing one knowledge base.</p><div class="price">$20<small> / user / mo</small></div>
       <ul><li>Everything in Pro</li><li>Shared workspaces</li><li>Admin &amp; SSO</li><li>Priority support</li></ul><button class="btn btn-p" onclick="pagewise('track','Contact sales clicked')">Contact sales</button></div>
   </div>
@@ -212,9 +212,18 @@ function page(base: string, parts: string[]): { title: string; body: string } {
     title: "Welcome",
     body: `<main><section class="pad center hero" style="min-height:70vh"><div class="c">
   <div class="num" style="margin:0 auto 24px;width:56px;height:56px;font-size:26px;border-radius:16px">&check;</div>
-  <h1>Welcome aboard.</h1><p class="lead">Your 14-day Pro trial has started. Check your inbox for a link to the app.</p>
+  <h1>Welcome aboard.</h1><p class="lead">Your Brightnote account is ready. Check your inbox for a link to the app.</p>
   <div class="btns" style="justify-content:center"><a class="btn btn-p" href="${base}">Back to home</a><a class="btn btn-g" href="${base}/blog">Read the blog</a></div>
-</div></section></main>`,
+</div></section></main>
+<script>
+  // What a real store's checkout does for Google Analytics: report the purchase
+  // in dataLayer. Pagewise reads the amount from here with no extra setup.
+  if (new URLSearchParams(location.search).get('plan') === 'pro') {
+    (window.dataLayer = window.dataLayer || []).push({ event: 'purchase', ecommerce: {
+      transaction_id: 'BN-' + Math.random().toString(36).slice(2, 10).toUpperCase(), value: 96, currency: 'USD',
+      items: [{ item_name: 'Brightnote Pro (yearly)', price: 96, quantity: 1 }] } });
+  }
+</script>`,
   };
   if (slug === "blog") return {
     title: "Blog",
@@ -320,10 +329,11 @@ function page(base: string, parts: string[]): { title: string; body: string } {
 export async function GET(req: Request, { params }: { params: Promise<{ siteId: string; page?: string[] }> }) {
   const { siteId, page: parts } = await params;
   const user = await currentUser();
-  const site = user ? (await siteAccess(siteId, user))?.site : null;
+  const access = user ? await siteAccess(siteId, user) : null;
+  const site = access && !access.site.demo_of ? access.site : null;
   if (!site) return new Response("Demo not found. Open it from your dashboard while signed in.", { status: 404 });
   const origin = appOrigin(req);
   const base = `/demo/${siteId}`;
   const p = page(base, parts ?? []);
-  return new Response(layout(base, p.title, p.body, origin, siteId), { headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response(layout(base, p.title, p.body, origin, siteId, (await demoSiteOf(site, true))!.id), { headers: { "content-type": "text/html; charset=utf-8" } });
 }

@@ -9,7 +9,7 @@ import { one, q } from "./db";
 import { atLeast, roleIn, type Role } from "./team";
 
 export type GoalType = "app_link" | "click_text" | "path" | "event";
-export interface Goal { id: string; type: GoalType; pattern: string; label: string }
+export interface Goal { id: string; type: GoalType; pattern: string; label: string; /** What one conversion is worth, in the site's currency (0 or missing: not set). */ value?: number }
 
 export interface ScanResult {
   scannedAt: string;
@@ -23,6 +23,8 @@ export interface ScanResult {
   records: { a: string[]; cname: string[]; wwwCname: string[] };
   /** Domain Connect: the DNS provider's sign-in-and-approve flow, when it offers one. */
   domainConnect?: { providerId: string; providerName: string; supported: boolean } | null;
+  /** Checkout / analytics tools on the homepage; `auto` when purchase amounts are read without setup. */
+  commerce?: { found: string[]; auto: boolean };
   error?: string;
 }
 
@@ -37,7 +39,9 @@ export interface DnsState {
 }
 
 export interface Site {
-  id: string; user_id: string; domain: string; verify_token: string; created_at: string;
+  id: string; user_id: string; domain: string; verify_token: string; created_at: string; currency: string;
+  /** Set on the hidden companion site that the demo website reports into. */
+  demo_of: string | null;
   installed_at: string | null; verified_at: string | null;
   scan: Partial<ScanResult>; dns: DnsState; goals: Goal[]; settings: { persistentIds?: boolean };
 }
@@ -74,7 +78,7 @@ export async function listSites(userId: string) {
      from sites s
      join users o on o.id = s.user_id
      left join team_members m on m.owner_id = s.user_id and m.user_id = $1 and m.accepted_at is not null
-     where s.user_id = $1 or m.id is not null
+     where (s.user_id = $1 or m.id is not null) and s.demo_of is null
      order by (s.user_id = $1) desc, s.created_at desc`,
     [userId],
   );
@@ -90,11 +94,21 @@ export async function createSite(userId: string, domain: string): Promise<Site> 
   return site!;
 }
 
+/** The hidden site the demo website reports into, created the first time the demo is opened. */
+export async function demoSiteOf(site: Site, create: boolean): Promise<Site | null> {
+  const existing = await one<Site>("select * from sites where demo_of = $1", [site.id]);
+  if (existing || !create) return existing;
+  return one<Site>(
+    `insert into sites (id, user_id, domain, verify_token, goals, currency, demo_of, installed_at)
+     values ($1, $2, $3, $4, $5::text::jsonb, $6, $7, now()) returning *`,
+    [`${site.id}_demo`, site.user_id, site.domain, randomBytes(12).toString("hex"), JSON.stringify(site.goals), site.currency, site.id]);
+}
+
 export async function getSite(id: string): Promise<Site | null> {
   return one<Site>("select * from sites where id = $1", [id]);
 }
 
-export async function patchSite(id: string, fields: Partial<Pick<Site, "scan" | "dns" | "goals" | "settings" | "verified_at" | "installed_at">>) {
+export async function patchSite(id: string, fields: Partial<Pick<Site, "scan" | "dns" | "goals" | "settings" | "verified_at" | "installed_at" | "currency">>) {
   const sets: string[] = [];
   const vals: unknown[] = [id];
   for (const [k, v] of Object.entries(fields)) {

@@ -19,6 +19,10 @@
  * API:
  *   pagewise('track', 'Signed up', { plan: 'pro' })
  *   pagewise('consent', true | false)
+ *   pagewise('track', 'Purchase', { value: 49, currency: 'USD', order_id: 'A1' })  → revenue
+ *
+ * Revenue is also read automatically from Google Analytics purchase events in
+ * dataLayer, Shopify and WooCommerce order pages, and schema.org Order data.
  */
 (function () {
   "use strict";
@@ -42,6 +46,8 @@
   var queue = [];
   var flushTimer = null;
   var persistent = script.getAttribute("data-persistent") === "true";
+  // A site served from a sub-folder (data-base="/shop") reports paths relative to it.
+  var BASE = (script.getAttribute("data-base") || "").replace(/\/+$/, "");
   var pv = null;               // current page view
   var sections = [];           // [{el, id, name, index, dwell, since, maxVis, seen}]
   var observer = null;
@@ -54,6 +60,11 @@
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
       var r = (Math.random() * 16) | 0; return (c === "x" ? r : (r & 3) | 8).toString(16);
     });
+  }
+  function rel(p) {
+    p = p || "/";
+    if (BASE && (p === BASE || p.indexOf(BASE + "/") === 0)) p = p.slice(BASE.length) || "/";
+    return p;
   }
   function clean(s, max) {
     if (!s) return "";
@@ -252,7 +263,7 @@
     enqueue({ t: "leave", pv: pv.id, path: pv.path, ms: Math.min(activeMs(), 1800000), scroll: pv.maxScroll, final: !!final });
   }
   function startPage() {
-    var path = location.pathname || "/";
+    var path = rel(location.pathname);
     var prevPath = null;
     if (pv) {
       if (pv.path === path) return;
@@ -261,7 +272,7 @@
     } else if (document.referrer) {
       try {
         var r = new URL(document.referrer);
-        if (r.hostname === location.hostname) prevPath = r.pathname;
+        if (r.hostname === location.hostname) prevPath = rel(r.pathname);
       } catch { /* ignore */ }
     }
     pv = { id: rid(), path: path, active: 0, since: document.visibilityState === "visible" ? now() : null, maxScroll: 0 };
@@ -275,6 +286,8 @@
     setTimeout(watchSections, 300);
     setTimeout(watchSections, 2000);
     setTimeout(onScroll, 350);
+    setTimeout(detectRevenue, 800);
+    setTimeout(detectRevenue, 3000);
   }
 
   // ── scroll ─────────────────────────────────────────────────────────────
@@ -300,7 +313,7 @@
     if (!/^https?:$/.test(u.protocol)) return { kind: "external" };
     if (u.hostname === location.hostname) {
       if (u.pathname === location.pathname && u.hash) return { kind: "anchor", path: u.hash };
-      return { kind: "internal", path: u.pathname };
+      return { kind: "internal", path: rel(u.pathname) };
     }
     // app.example.com from www.example.com: the visitor is heading into the product.
     if (baseDomain(u.hostname) === baseDomain(location.hostname)) return { kind: "app", path: u.pathname };
@@ -370,10 +383,79 @@
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("pagehide", function () { emitLeave(true); flush(true); });
 
+  // ── revenue ────────────────────────────────────────────────────────────
+  // Purchase values the page already exposes. Only the amount, currency and
+  // order id are read: never names, emails, addresses or card details.
+  var orders = {};
+  function revenue(amount, currency, order, source) {
+    if (typeof amount === "string") amount = money(amount);
+    amount = Number(amount);
+    if (!(amount > 0) || amount > 1e7 || !pv) return;
+    var id = order ? clean(order, 80) : "";
+    if (id) { if (orders[id]) return; orders[id] = 1; }
+    enqueue({ t: "rev", pv: pv.id, path: pv.path, amt: Math.round(amount * 100) / 100, cur: clean(currency, 3).toUpperCase(), oid: id, src: source });
+  }
+  // "1.234,56 €" / "$1,234.56" → 1234.56: the last separator followed by 1-2 digits is the decimal point.
+  function money(t) {
+    t = String(t).replace(/[^\d.,]/g, "");
+    var m = t.match(/^(.*)[.,](\d{1,2})$/);
+    return Number(m ? m[1].replace(/[.,]/g, "") + "." + m[2] : t.replace(/[.,]/g, ""));
+  }
+  var SYMBOLS = { "$": "USD", "€": "EUR", "£": "GBP", "₹": "INR", "¥": "JPY", "A$": "AUD", "C$": "CAD", "R$": "BRL", "zł": "PLN", "kr": "SEK" };
+  // Google Analytics ecommerce: gtag('event','purchase',{…}) or dataLayer.push({event:'purchase', ecommerce:{…}}).
+  function fromLayer(o) {
+    if (!o || typeof o !== "object") return;
+    if (o[0] === "event" && o[1] === "purchase" && o[2]) return revenue(o[2].value, o[2].currency, o[2].transaction_id, "datalayer");
+    var e = o.ecommerce || {};
+    if (o.event === "purchase") return revenue(e.value != null ? e.value : o.value, e.currency || o.currency, e.transaction_id || o.transaction_id, "datalayer");
+    var u = e.purchase && e.purchase.actionField; // Universal Analytics enhanced ecommerce
+    if (u) revenue(u.revenue, e.currencyCode, u.id, "datalayer");
+  }
+  var layerSeen = 0;
+  function scanLayer() {
+    var dl = window.dataLayer;
+    if (!dl || !dl.length) return;
+    for (; layerSeen < dl.length; layerSeen++) fromLayer(dl[layerSeen]);
+  }
+  function hookLayer() {
+    var dl = window.dataLayer = window.dataLayer || [];
+    if (dl.__pw) return;
+    var orig = dl.push;
+    dl.push = function () { var r = orig.apply(dl, arguments); scanLayer(); return r; };
+    dl.__pw = true;
+  }
+  function detectRevenue() {
+    scanLayer();
+    var S = window.Shopify;
+    if (S && S.checkout && S.checkout.total_price) revenue(S.checkout.total_price, S.checkout.currency, S.checkout.order_id, "shopify");
+    var w = document.querySelector(".woocommerce-order-overview__total .amount, .woocommerce-order-overview__total");
+    if (w) {
+      var sym = w.querySelector(".woocommerce-Price-currencySymbol");
+      var no = document.querySelector(".woocommerce-order-overview__order strong");
+      revenue(w.textContent, sym ? SYMBOLS[clean(sym.textContent, 3)] || "" : "", no ? "wc-" + no.textContent : "", "woocommerce");
+    }
+    var ld = document.querySelectorAll('script[type="application/ld+json"]');
+    for (var i = 0; i < ld.length; i++) {
+      try {
+        var d = JSON.parse(ld[i].textContent || "null"), list = [].concat((d && d["@graph"]) || d);
+        for (var j = 0; j < list.length; j++) {
+          var o = list[j];
+          if (!o || (o["@type"] !== "Order" && o["@type"] !== "Invoice")) continue;
+          var pay = o.totalPaymentDue || {}, off = [].concat(o.acceptedOffer || [])[0] || {};
+          revenue(pay.price != null ? pay.price : off.price, pay.priceCurrency || off.priceCurrency, o.orderNumber || o.confirmationNumber, "jsonld");
+        }
+      } catch { /* not JSON */ }
+    }
+  }
+  hookLayer();
+
   // ── public API ─────────────────────────────────────────────────────────
   var pending = (window.pagewise && window.pagewise.q) || [];
   window.pagewise = function (cmd, a, b) {
-    if (cmd === "track" && a) enqueue({ t: "ev", pv: pv && pv.id, path: pv && pv.path, name: clean(a, 100), props: b && typeof b === "object" ? b : {} });
+    if (cmd === "track" && a) {
+      enqueue({ t: "ev", pv: pv && pv.id, path: pv && pv.path, name: clean(a, 100), props: b && typeof b === "object" ? b : {} });
+      if (b && b.value != null) revenue(b.value, b.currency, b.order_id || b.transaction_id, "track");
+    }
     else if (cmd === "consent") { persistent = !!a; visitorId(); }
   };
   for (var p = 0; p < pending.length; p++) window.pagewise.apply(null, pending[p]);

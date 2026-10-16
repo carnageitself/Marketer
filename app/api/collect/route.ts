@@ -7,6 +7,7 @@
 // one, then write the events. The IP is used only inside the hash and is
 // never stored.
 import { createHash, randomUUID } from "node:crypto";
+import { convert, isCurrency, rates } from "@/lib/fx";
 import { one, q } from "@/lib/db";
 import { channelOf, clientIp, geo, parseUa, prettySource, sourceOf } from "@/lib/enrich";
 
@@ -22,12 +23,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const PV_ID_RE = /^[0-9a-zA-Z-]{8,64}$/;
 
 // Site lookups happen on every batch from every visitor, so cache them briefly.
-const siteCache = new Map<string, { domain: string; installed: boolean; exp: number } | null>();
+const siteCache = new Map<string, { domain: string; installed: boolean; currency: string; exp: number } | null>();
 async function siteInfo(id: string) {
   const hit = siteCache.get(id);
   if (hit !== undefined && (hit === null || hit.exp > Date.now())) return hit;
-  const row = await one<{ domain: string; installed_at: string | null }>("select domain, installed_at from sites where id = $1", [id]);
-  const info = row ? { domain: row.domain, installed: !!row.installed_at, exp: Date.now() + 60_000 } : null;
+  const row = await one<{ domain: string; installed_at: string | null; currency: string }>("select domain, installed_at, currency from sites where id = $1", [id]);
+  const info = row ? { domain: row.domain, installed: !!row.installed_at, currency: row.currency, exp: Date.now() + 60_000 } : null;
   siteCache.set(id, info);
   if (!info) setTimeout(() => siteCache.delete(id), 60_000);
   return info;
@@ -62,6 +63,7 @@ interface Ev {
   t?: string; ts?: number; pv?: string; path?: string; title?: string; prev?: string; q?: string; r?: string;
   ms?: number; scroll?: number; sid?: string; name?: string; idx?: number; vis?: number;
   label?: string; sec?: string; kind?: string; href?: string; tpath?: string; props?: Record<string, unknown>;
+  amt?: number; cur?: string; oid?: string; src?: string;
 }
 
 export function OPTIONS() {
@@ -171,6 +173,16 @@ export async function POST(req: Request) {
       await q(
         `insert into clicks (site_id, visit_id, pageview_id, ts, path, kind, href, target_path, label, section_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [siteId, visitId, pvId, ts, path, kind, str(e.href, 1000), str(e.tpath), str(e.label, 120), str(e.sec, 120)],
+      );
+    } else if (e.t === "rev" && typeof e.amt === "number" && e.amt > 0 && e.amt <= 10_000_000) {
+      // A sale. Unknown or missing currency means the site's own; amount_usd is fixed at today's rate.
+      const cur = isCurrency(e.cur) ? e.cur! : site.currency;
+      const usd = convert(e.amt, cur, "USD", await rates(), site.currency);
+      const src = ["datalayer", "shopify", "woocommerce", "jsonld", "track"].includes(e.src ?? "") ? e.src : "track";
+      await q(
+        `insert into revenue_events (site_id, visit_id, pageview_id, ts, path, amount, currency, amount_usd, source, order_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (site_id, order_id) do nothing`,
+        [siteId, visitId, pvId, ts, path, Math.round(e.amt * 100) / 100, cur, Math.round(usd * 100) / 100, src, str(e.oid, 80)],
       );
     } else if (e.t === "ev" && str(e.name, 100)) {
       const props = e.props && typeof e.props === "object" ? JSON.stringify(e.props).slice(0, 2000) : "{}";

@@ -12,7 +12,7 @@ export default async function SetupPage({ params }: { params: Promise<{ id: stri
   if (!user) redirect("/login");
   const { id } = await params;
   const access = await siteAccess(id, user);
-  if (!access) notFound();
+  if (!access || access.site.demo_of) notFound();
   const { site, role } = access;
   return <Setup email={user.email} role={role} account={await accountOf(user)} initial={JSON.parse(JSON.stringify(await setupInfo(site, appOrigin(await headers()))))} />;
 }

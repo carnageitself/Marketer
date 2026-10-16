@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import AppShell, { type Account, type NavId } from "./AppShell";
 import { PLANS, RANGE_DAYS } from "@/lib/plans";
+import { money } from "@/lib/currency";
 import { AreaChart, type SeriesPoint } from "./Chart";
 import { Icon } from "./icons";
 import { Badge, BarList, Card, Delta, Empty, Loading, PageHeader, Tabs, Upsell, fmt } from "./ui";
@@ -12,8 +13,9 @@ import { PagesTab, SectionsTab, SettingsTab, VisitorsTab } from "./DashboardTabs
 
 export interface SiteProps {
   id: string; domain: string; installed_at: string | null;
-  goals: { id: string; type: "app_link" | "click_text" | "path" | "event"; pattern: string; label: string }[];
+  goals: { id: string; type: "app_link" | "click_text" | "path" | "event"; pattern: string; label: string; value?: number }[];
   settings: { persistentIds?: boolean };
+  currency: string;
 }
 type Tab = "overview" | "sources" | "pages" | "sections" | "visitors" | "settings";
 const TABS: Record<Tab, { title: string; subtitle: string }> = {
@@ -26,19 +28,30 @@ const TABS: Record<Tab, { title: string; subtitle: string }> = {
 };
 const RANGES = [{ id: "24h", label: "24h" }, { id: "7d", label: "7d" }, { id: "30d", label: "30d" }, { id: "90d", label: "90d" }];
 
-export default function Dashboard({ email, site, initialTab, account, role }: { email: string; site: SiteProps; initialTab?: string; account: Account; role: string }) {
+export default function Dashboard({ email, site, initialTab, account, role, demoId, initialView }: {
+  email: string; site: SiteProps; initialTab?: string; account: Account; role: string;
+  /** The hidden site the demo website reports into, once the demo has been opened. */
+  demoId: string | null; initialView: "real" | "demo";
+}) {
   const [tab, setTab] = useState<Tab>(initialTab && initialTab in TABS ? (initialTab as Tab) : "overview");
   const [range, setRange] = useState("30d");
   const plan = PLANS[account.plan];
   // Ranges beyond the plan's history show a lock and lead to the upgrade page.
   const ranges = RANGES.map(r => ({ ...r, label: RANGE_DAYS[r.id] > plan.limits.historyDays ? `${r.label} 🔒` : r.label }));
   const pickRange = (id: string) => (RANGE_DAYS[id] > plan.limits.historyDays ? window.location.assign("/billing") : setRange(id));
-  const go = (t: Tab) => { setTab(t); history.replaceState(null, "", `?tab=${t}`); window.scrollTo({ top: 0 }); };
+  const [view, setView] = useState<"real" | "demo">(initialView);
+  const demo = view === "demo" && !!demoId;
+  // Reports read from the demo companion site in demo view; settings always belong to the real site.
+  const statsId = demo ? demoId! : site.id;
+  const url = (t: Tab, v: "real" | "demo") => `?tab=${t}${v === "demo" ? "&view=demo" : ""}`;
+  const go = (t: Tab) => { setTab(t); history.replaceState(null, "", url(t, view)); window.scrollTo({ top: 0 }); };
+  const pickView = (v: "real" | "demo") => { setView(v); history.replaceState(null, "", url(tab, v)); };
 
   return (
     <AppShell email={email} site={site} active={tab} account={account} onNav={(id: NavId) => go(id as Tab)}>
       <PageHeader title={TABS[tab].title} subtitle={TABS[tab].subtitle} actions={tab !== "settings" && (
         <>
+          {demoId && <Tabs tabs={[{ id: "real", label: "Your data" }, { id: "demo", label: "Demo data" }]} value={view} onChange={pickView} />}
           <a href={`/demo/${site.id}`} target="_blank" rel="noreferrer"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12.5px] font-medium text-muted transition hover:bg-panel-2 hover:text-ink">
             <Icon name="external" size={14} />Demo site
@@ -46,20 +59,27 @@ export default function Dashboard({ email, site, initialTab, account, role }: { 
           <Tabs tabs={ranges} value={range} onChange={pickRange} />
         </>
       )} />
-      {!site.installed_at && (
+      {demo && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent-soft px-4 py-3 text-[13px]">
+          <span><b>You&apos;re looking at demo data</b> from the Brightnote demo website. It&apos;s kept separate, so your real numbers for {site.domain} are never affected.</span>
+          <button onClick={() => pickView("real")} className="inline-flex h-8 items-center rounded-lg border border-line bg-panel px-3 text-[12.5px] font-medium hover:bg-panel-2">Back to your data</button>
+        </div>
+      )}
+      {!demo && !site.installed_at && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warn/25 bg-warn-soft px-4 py-3 text-[13px]">
-          <span><b>No data yet.</b> Add the tracker to {site.domain}, or open the demo site to see data arrive.</span>
+          <span><b>No data yet.</b> Add the tracker to {site.domain}. Want to look around first? Open the demo website; its visits appear under <b>Demo data</b>.</span>
           <div className="flex gap-2">
             <a className="inline-flex h-8 items-center rounded-lg border border-line bg-panel px-3 text-[12.5px] font-medium hover:bg-panel-2" href={`/demo/${site.id}`} target="_blank" rel="noreferrer">Open demo site</a>
             <Link className="inline-flex h-8 items-center rounded-lg bg-accent px-3 text-[12.5px] font-medium text-on-accent hover:bg-accent-hover" href={`/sites/${site.id}/setup`}>Finish setup</Link>
           </div>
         </div>
       )}
-      {tab === "overview" && <Overview siteId={site.id} range={range} go={go} converters={plan.can.converters} />}
-      {tab === "sources" && <Sources siteId={site.id} range={range} />}
-      {tab === "pages" && <PagesTab siteId={site.id} range={range} />}
-      {tab === "sections" && <SectionsTab siteId={site.id} range={range} />}
-      {tab === "visitors" && <VisitorsTab siteId={site.id} range={range} />}
+      {/* key: switching views remounts the tab, so no state leaks between demo and real data */}
+      {tab === "overview" && <Overview key={statsId} siteId={statsId} range={range} go={go} converters={plan.can.converters} />}
+      {tab === "sources" && <Sources key={statsId} siteId={statsId} range={range} currency={site.currency} />}
+      {tab === "pages" && <PagesTab key={statsId} siteId={statsId} range={range} />}
+      {tab === "sections" && <SectionsTab key={statsId} siteId={statsId} range={range} />}
+      {tab === "visitors" && <VisitorsTab key={statsId} siteId={statsId} range={range} />}
       {tab === "settings" && <SettingsTab site={site} role={role} />}
     </AppShell>
   );
@@ -70,12 +90,13 @@ export default function Dashboard({ email, site, initialTab, account, role }: { 
 interface Kpis {
   visitors: number; visits: number; pageviews: number; pagesPerVisit: number; avgActiveMs: number; bounceRate: number | null;
   conversions: number; conversionRate: number | null; engagedRate: number | null; clickRate: number | null; readThroughRate: number | null;
+  revenue: number; revenuePerVisitor: number; avgOrderValue: number;
 }
 interface Side { visits: number; pages: number; activeMs: number; scroll: number; clickRate: number | null; topSource: string; topEntry: string; topDevice: string }
-interface OverviewData { range: { bucket: "hour" | "day" }; kpis: Kpis; previous: Kpis; series: SeriesPoint[]; live: number; converters: { converted: Side | null; others: Side | null } }
+interface OverviewData { range: { bucket: "hour" | "day" }; kpis: Kpis; previous: Kpis; series: SeriesPoint[]; live: number; converters: { converted: Side | null; others: Side | null }; revenue: { measured: boolean; currency: string } }
 interface InsightT { tone: "good" | "bad" | "info"; title: string; detail: string; tab?: Tab }
 type Row = Record<string, unknown> & { key: string };
-type Metric = "visitors" | "visits" | "pageviews" | "conversions";
+type Metric = "visitors" | "visits" | "pageviews" | "conversions" | "revenue";
 
 const delta = (a: number | null, b: number | null) => (a === null || b === null || !b ? null : Math.round(((a - b) / b) * 100));
 const CHANNEL_LABEL: Record<string, string> = { direct: "Direct", organic: "Organic search", social: "Social", ai: "AI assistants", referral: "Referral", paid: "Paid", email: "Email", campaign: "Campaign", affiliate: "Affiliate" };
@@ -94,30 +115,52 @@ function Overview({ siteId, range, go, converters }: { siteId: string; range: st
     { id: "pageviews", label: "Page views", value: fmt.n(k.pageviews), d: delta(k.pageviews, p.pageviews) },
     { id: "conversions", label: "Conversions", value: fmt.n(k.conversions), d: delta(k.conversions, p.conversions) },
   ] : [];
+  const cur = data?.revenue?.currency ?? "USD";
+  const measured = !!data?.revenue?.measured;
+  const chartLabel = metric === "pageviews" ? "Views" : metric[0].toUpperCase() + metric.slice(1);
 
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-3">
         <section className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel shadow-card xl:col-span-2">
-          <div className="grid grid-cols-2 border-b border-line md:grid-cols-4">
-            {!data ? Array.from({ length: 4 }, (_, i) => <div key={i} className="h-21 animate-pulse border-line bg-panel-2/50 md:border-r" />) : main.map((m, i) => (
-              <button key={m.id} onClick={() => setMetric(m.id)}
-                className={`relative px-5 py-4 text-left transition hover:bg-panel-2/60 ${i % 2 ? "" : "border-r"} border-line md:border-r ${i === 3 ? "md:border-r-0" : ""} ${i < 2 ? "border-b md:border-b-0" : ""}`}>
-                <div className="text-[12px] font-medium text-muted">{m.label}</div>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="tabular text-[24px] font-semibold tracking-tight">{m.value}</span>
-                  <Delta value={m.d} />
-                </div>
-                {metric === m.id && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
-              </button>
-            ))}
+          <div className="grid grid-cols-2 gap-px border-b border-line bg-line lg:grid-cols-5">
+            {!data || !k || !p ? Array.from({ length: 5 }, (_, i) => <div key={i} className={`h-21 animate-pulse bg-panel ${i === 4 ? "col-span-2 lg:col-span-1" : ""}`} />) : <>
+              {main.map(m => (
+                <button key={m.id} onClick={() => setMetric(m.id)} className="relative bg-panel px-5 py-4 text-left transition hover:bg-panel-2">
+                  <div className="text-[12px] font-medium text-muted">{m.label}</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="tabular text-[24px] font-semibold tracking-tight">{m.value}</span>
+                    <Delta value={m.d} />
+                  </div>
+                  {metric === m.id && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
+                </button>
+              ))}
+              {measured ? (
+                <button onClick={() => setMetric("revenue")} title="Before refunds. Tracked purchases, or the value of the goals people reached."
+                  className="relative col-span-2 bg-panel px-5 py-4 text-left transition hover:bg-panel-2 lg:col-span-1">
+                  <div className="text-[12px] font-medium text-muted">Revenue <span className="text-faint">· before refunds</span></div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="tabular text-[24px] font-semibold tracking-tight">{money(k.revenue, cur)}</span>
+                    <Delta value={delta(k.revenue, p.revenue)} />
+                  </div>
+                  <div className="mt-0.5 truncate text-[11.5px] text-muted">{money(k.revenuePerVisitor, cur)} per visitor{k.avgOrderValue ? ` · ${money(k.avgOrderValue, cur)} avg.` : ""}</div>
+                  {metric === "revenue" && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
+                </button>
+              ) : (
+                <button onClick={() => go("settings")} className="col-span-2 bg-panel px-5 py-4 text-left transition hover:bg-panel-2 lg:col-span-1">
+                  <div className="text-[12px] font-medium text-muted">Revenue</div>
+                  <div className="mt-1.5 text-[13px] font-semibold text-accent">Set up revenue →</div>
+                  <div className="mt-0.5 text-[11.5px] leading-snug text-muted">Add what a conversion is worth</div>
+                </button>
+              )}
+            </>}
           </div>
           <div className="px-3 pb-3 pt-4">
             <div className="mb-1 flex items-center justify-between px-2">
-              <span className="text-[12px] text-muted">{main.find(m => m.id === metric)?.label ?? ""} over time</span>
+              <span className="text-[12px] text-muted">{metric === "revenue" ? "Revenue" : main.find(m => m.id === metric)?.label ?? ""} over time</span>
               {!!data?.live && <Badge tone="good" dot>{data.live} live now</Badge>}
             </div>
-            {data ? <AreaChart data={data.series} metric={metric} label={metric === "pageviews" ? "Views" : metric[0].toUpperCase() + metric.slice(1)} bucket={data.range.bucket} height={300} />
+            {data ? <AreaChart data={data.series} metric={metric} label={chartLabel} bucket={data.range.bucket} height={300} format={metric === "revenue" ? v => money(v, cur) : undefined} />
               : <div className="h-75 animate-pulse rounded-lg bg-panel-2/50" />}
           </div>
         </section>
@@ -290,19 +333,25 @@ function LinkBtn({ onClick, children }: { onClick: () => void; children: React.R
 
 // ── Sources ─────────────────────────────────────────────────────────────────
 
-function Sources({ siteId, range }: { siteId: string; range: string }) {
-  const { data, error } = useReport<Record<string, Row[]>>(siteId, "sources", { range });
+function Sources({ siteId, range, currency }: { siteId: string; range: string; currency: string }) {
+  const { data, error } = useReport<Record<string, Row[]> & { revenueLocked: boolean }>(siteId, "sources", { range });
   if (error) return <Card><Empty>{error}</Empty></Card>;
+  // A revenue column once there's revenue to show; on Free it's replaced by a pointer to Pro.
+  const showRevenue = !!data && !data.revenueLocked && data.channels.some(r => Number(r.revenue) > 0);
+  const cols = showRevenue ? ["Visits", "Conv.", "Revenue"] : ["Visits", "Bounce", "Conv."];
   const conv = (rows: Row[], label?: (k: string) => string) => rows.map(r => ({
     key: label ? label(r.key) : r.key, value: Number(r.visits),
-    cells: [fmt.n(r.visits), fmt.rate(r.bounces, r.visits), fmt.rate(r.conversions, r.visits)],
+    cells: showRevenue
+      ? [fmt.n(r.visits), fmt.rate(r.conversions, r.visits), money(Number(r.revenue), currency)]
+      : [fmt.n(r.visits), fmt.rate(r.bounces, r.visits), fmt.rate(r.conversions, r.visits)],
   }));
   const simple = (rows: Row[]) => rows.map(r => ({ key: r.key, value: Number(r.visits), cells: [fmt.n(r.visits), fmt.rate(r.conversions, r.visits)] }));
+  const lockNote = data?.revenueLocked && <a href="/billing" className="mt-4 flex items-center gap-1.5 border-t border-line pt-3 text-[12.5px] text-muted hover:text-ink"><Icon name="sparkle" size={13} className="text-accent" />See revenue by channel and source on Pro →</a>;
   const cards: [string, (d: Record<string, Row[]>) => React.ReactNode][] = [
-    ["Channels", d => <BarList rows={conv(d.channels, x => CHANNEL_LABEL[x] ?? x)} columns={["Visits", "Bounce", "Conv."]} />],
-    ["Sources", d => <BarList rows={conv(d.sources)} columns={["Visits", "Bounce", "Conv."]} />],
-    ["Campaigns (UTM)", d => <BarList rows={conv(d.campaigns)} columns={["Visits", "Bounce", "Conv."]} empty="No tagged campaigns yet. Add ?utm_campaign=… to your links." />],
-    ["Landing pages", d => <BarList rows={conv(d.landing)} columns={["Visits", "Bounce", "Conv."]} />],
+    ["Channels", d => <><BarList rows={conv(d.channels, x => CHANNEL_LABEL[x] ?? x)} columns={cols} />{lockNote}</>],
+    ["Sources", d => <BarList rows={conv(d.sources)} columns={cols} />],
+    ["Campaigns (UTM)", d => <BarList rows={conv(d.campaigns)} columns={cols} empty="No tagged campaigns yet. Add ?utm_campaign=… to your links." />],
+    ["Landing pages", d => <BarList rows={conv(d.landing)} columns={cols} />],
     ["Devices", d => <BarList rows={simple(d.devices)} columns={["Visits", "Conv."]} />],
     ["Countries", d => <BarList rows={simple(d.countries)} columns={["Visits", "Conv."]} empty="Country appears once deployed on Vercel or behind Cloudflare." />],
     ["Browsers", d => <BarList rows={simple(d.browsers)} columns={["Visits", "Conv."]} />],

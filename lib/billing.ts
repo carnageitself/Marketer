@@ -19,8 +19,8 @@ export interface Usage { pageviews: number; sites: number; periodStart: string }
 export async function usageOf(userId: string): Promise<Usage> {
   const r = await one<{ pageviews: number; sites: number; start: string }>(
     `select (select count(*)::int from pageviews p join sites s on s.id = p.site_id
-               where s.user_id = $1 and p.ts >= date_trunc('month', now())) as pageviews,
-            (select count(*)::int from sites where user_id = $1) as sites,
+               where s.user_id = $1 and s.demo_of is null and p.ts >= date_trunc('month', now())) as pageviews,
+            (select count(*)::int from sites where user_id = $1 and demo_of is null) as sites,
             to_char(date_trunc('month', now()) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as start`,
     [userId]);
   return { pageviews: r?.pageviews ?? 0, sites: r?.sites ?? 0, periodStart: r?.start ?? "" };

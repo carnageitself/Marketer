@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 export interface SeriesPoint { t: string; [k: string]: number | string }
 
-export function AreaChart({ data, metric, label, bucket, height = 220 }: { data: SeriesPoint[]; metric: string; label: string; bucket: "hour" | "day"; height?: number }) {
+export function AreaChart({ data, metric, label, bucket, height = 220, format }: { data: SeriesPoint[]; metric: string; label: string; bucket: "hour" | "day"; height?: number; format?: (v: number) => string }) {
   const ref = useRef<HTMLDivElement>(null);
   const grad = useId().replace(/:/g, "");
   const [w, setW] = useState(600);
@@ -50,7 +50,7 @@ export function AreaChart({ data, metric, label, bucket, height = 220 }: { data:
         {[0, 0.25, 0.5, 0.75, 1].map(f => (
           <g key={f}>
             <line x1={padL} x2={w - padR} y1={y(nice * f)} y2={y(nice * f)} stroke="var(--border)" strokeDasharray={f ? "3 4" : undefined} />
-            <text x={padL - 8} y={y(nice * f) + 4} textAnchor="end" fontSize="10.5" fill="var(--faint)" className="tabular">{Math.round(nice * f).toLocaleString("en-US")}</text>
+            <text x={padL - 8} y={y(nice * f) + 4} textAnchor="end" fontSize="10.5" fill="var(--faint)" className="tabular">{format ? format(Math.round(nice * f)) : Math.round(nice * f).toLocaleString("en-US")}</text>
           </g>
         ))}
         {data.map((d, i) => i % every === 0 && (
@@ -69,7 +69,7 @@ export function AreaChart({ data, metric, label, bucket, height = 220 }: { data:
         <div className="pointer-events-none absolute top-0 rounded-lg border border-line bg-panel px-3 py-2 text-[12px] shadow-pop"
           style={{ left: Math.min(Math.max(0, x(hover) - 70), w - 160) }}>
           <div className="text-muted">{bucket === "hour" ? new Date(data[hover].t).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric" }) : tick(data[hover].t)}</div>
-          <div className="tabular mt-0.5 font-semibold">{vals[hover].toLocaleString("en-US")} {label.toLowerCase()}</div>
+          <div className="tabular mt-0.5 font-semibold">{format ? `${format(vals[hover])} ${label.toLowerCase()}` : `${vals[hover].toLocaleString("en-US")} ${label.toLowerCase()}`}</div>
         </div>
       )}
     </div>

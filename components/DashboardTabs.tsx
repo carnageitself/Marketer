@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Badge, BarList, Button, Card, Empty, Loading, Table, Upsell, field, fmt } from "./ui";
 import { Icon } from "./icons";
+import { CURRENCIES, money } from "@/lib/currency";
 import { useReport } from "./useReport";
 import type { SiteProps } from "./Dashboard";
 
@@ -78,6 +79,7 @@ interface Sec {
   id: string; name: string; index: number; seen: number; reach: number | null; avgDwellMs: number; medianDwellMs: number;
   engagedRate: number | null; avgVisible: number; clicks: number; readers: number; readerConvRate: number | null;
   nonReaders: number; nonReaderConvRate: number | null; lift: number | null;
+  readerRevPerVisit: number | null; nonReaderRevPerVisit: number | null;
 }
 
 export function SectionsTab({ siteId, range }: { siteId: string; range: string }) {
@@ -85,12 +87,15 @@ export function SectionsTab({ siteId, range }: { siteId: string; range: string }
   const [picked, setPath] = useState<string | null>(null);
   const list = pages.data?.pages ?? [];
   const path = picked ?? (list[0] ? s(list[0].path) : null);
-  const secs = useReport<{ sections: Sec[] }>(siteId, "sections", { range, path: path ?? undefined }, !!path);
+  const secs = useReport<{ sections: Sec[]; revenueLocked: boolean; currency: string }>(siteId, "sections", { range, path: path ?? undefined }, !!path);
   if (pages.error) return <Card><Empty>{pages.error}</Empty></Card>;
   if (!pages.data) return <Card><Loading rows={6} /></Card>;
   if (!list.length) return <Empty>No section data yet. Sections are detected automatically on every page; they appear after the first visits.</Empty>;
   const rows = secs.data?.sections ?? [];
   const maxDwell = Math.max(...rows.map(r => r.avgDwellMs), 1);
+  const cur = secs.data?.currency ?? "USD";
+  const showRev = rows.some(r => (r.readerRevPerVisit ?? 0) > 0 || (r.nonReaderRevPerVisit ?? 0) > 0);
+  const cols = showRev ? "md:grid-cols-[minmax(0,1fr)_100px_80px_64px_170px_150px]" : "md:grid-cols-[minmax(0,1fr)_110px_110px_90px_190px]";
 
   return (
     <div className="space-y-6">
@@ -104,11 +109,12 @@ export function SectionsTab({ siteId, range }: { siteId: string; range: string }
         action={<span className="hidden text-[12px] text-muted sm:inline">Top to bottom in page order</span>}>
         {!secs.data ? <Loading rows={6} /> : !rows.length ? <Empty>No sections seen on this page yet.</Empty> : (
           <div className="space-y-1">
-            <div className="hidden grid-cols-[1fr_90px_90px_80px_150px] gap-3 px-1 pb-1 text-[11px] uppercase tracking-wide text-muted md:grid">
+            <div className={`hidden gap-3 px-1 pb-1 text-[11px] uppercase tracking-wide text-muted md:grid ${cols}`}>
               <span>Section · reach</span><span className="text-right">Avg. read</span><span className="text-right">Engaged</span><span className="text-right">Clicks</span><span className="text-right">Readers convert</span>
+              {showRev && <span className="text-right">Readers spend</span>}
             </div>
             {rows.map(r => (
-              <div key={r.id} className="grid grid-cols-2 items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-panel-2 md:grid-cols-[minmax(0,1fr)_110px_110px_90px_190px]">
+              <div key={r.id} className={`grid grid-cols-2 items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-panel-2 ${cols}`}>
                 <div className="col-span-2 min-w-0 md:col-span-1">
                   <div className="flex items-center justify-between gap-2 text-[13px]">
                     <span className="truncate font-medium" title={r.id}>{r.name}</span>
@@ -132,12 +138,25 @@ export function SectionsTab({ siteId, range }: { siteId: string; range: string }
                     </span>
                   )}
                 </div>
+                {showRev && (
+                  <div className="text-right text-[13px]" title="Revenue per visit: visitors who read this section vs those who didn't (before refunds)">
+                    <span className="text-muted md:hidden">Readers spend </span>
+                    {r.readerRevPerVisit === null ? <span className="text-muted">—</span> : <>
+                      <span className={`tabular ${(r.readerRevPerVisit ?? 0) > (r.nonReaderRevPerVisit ?? 0) ? "font-semibold text-good" : ""}`}>{money(r.readerRevPerVisit, cur)}</span>
+                      <span className="text-muted"> vs {money(r.nonReaderRevPerVisit, cur)}</span>
+                    </>}
+                  </div>
+                )}
               </div>
             ))}
             <p className="pt-3 text-[12px] text-muted">
               <b>Reach</b>: share of page views where the section was on screen. <b>Engaged</b>: stayed 3s+. <b>Readers convert</b>: conversion rate of visits that read the section (1s+)
               vs visits to this page that didn&apos;t. A high multiplier on a low-reach section usually means it should move up.
+              {showRev && <> <b>Readers spend</b>: revenue per visit for readers vs everyone else, before refunds. It shows association, not proof the section caused the sale.</>}
             </p>
+            {secs.data?.revenueLocked && (
+              <a href="/billing" className="mt-2 flex items-center gap-1.5 text-[12.5px] text-muted hover:text-ink"><Icon name="sparkle" size={13} className="text-accent" />See how much revenue each section brings in on Pro →</a>
+            )}
           </div>
         )}
       </Card>
@@ -263,6 +282,7 @@ export function SettingsTab({ site, role }: { site: SiteProps; role: string }) {
   const canDelete = role === "owner" || role === "admin";
   const [goals, setGoals] = useState(site.goals);
   const [persistent, setPersistent] = useState(!!site.settings.persistentIds);
+  const [currency, setCurrency] = useState(site.currency || "USD");
   const [msg, setMsg] = useState("");
   const save = async (body: object) => {
     setMsg("");
@@ -288,11 +308,20 @@ export function SettingsTab({ site, role }: { site: SiteProps; role: string }) {
                   onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, pattern: e.target.value } : x))} />
               )}
               <input value={g.label} placeholder="Name" className={`${field} min-w-0 md:flex-[2]`} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
+              <label className="relative md:w-32 md:shrink-0" title="What one conversion is worth to you. Used for revenue when the page doesn't report a purchase amount.">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-faint">{currency}</span>
+                <input type="number" min={0} step="any" value={g.value ?? ""} placeholder="Worth" className={`${field} w-full pl-11 tabular`}
+                  onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, value: e.target.value === "" ? undefined : Number(e.target.value) } : x))} />
+              </label>
               <button title="Remove goal" className="self-end rounded-md p-2 text-muted transition hover:bg-bad-soft hover:text-bad md:self-auto" onClick={() => setGoals(goals.filter((_, j) => j !== i))}><Icon name="trash" size={15} /></button>
             </div>
           ))}
           {!goals.length && <Empty>No goals. Without one, nothing counts as a conversion.</Empty>}
         </div>
+        <p className="mt-3 text-[12px] leading-relaxed text-muted">
+          <b className="text-ink">Worth</b> is optional: what one conversion is worth to you, e.g. a demo request worth {currency} 500. It counts as revenue when the page
+          doesn&apos;t report the real amount. Purchases from Shopify, WooCommerce or Google Analytics ecommerce are picked up automatically and take priority.
+        </p>
         <div className="mt-4 flex gap-2">
           <Button variant="ghost" onClick={() => setGoals([...goals, { id: `g_${Date.now()}`, type: "click_text", pattern: "", label: "" }])}><Icon name="plus" size={14} />Add goal</Button>
           <Button onClick={() => save({ goals })}>Save goals</Button>
@@ -300,6 +329,15 @@ export function SettingsTab({ site, role }: { site: SiteProps; role: string }) {
       </Card>
 
       <div className="min-w-0 space-y-6">
+        <Card title={<span className="flex items-center gap-2"><Icon name="target" size={15} className="text-accent" />Revenue</span>}>
+          <label className="block text-[13px]">
+            <span className="font-semibold">Reporting currency</span>
+            <span className="mt-0.5 block text-muted">Revenue in other currencies is converted at the European Central Bank&apos;s daily rate, so totals add up.</span>
+            <select value={currency} className={`${field} mt-2.5 w-full`} onChange={e => { setCurrency(e.target.value); save({ currency: e.target.value }); }}>
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+        </Card>
         <Card title={<span className="flex items-center gap-2"><Icon name="shield" size={15} className="text-accent" />Privacy</span>}>
           <label className="flex cursor-pointer items-start gap-3 text-[13px]">
             <input type="checkbox" checked={persistent} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" onChange={e => { setPersistent(e.target.checked); save({ settings: { persistentIds: e.target.checked } }); }} />

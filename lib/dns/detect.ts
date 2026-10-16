@@ -138,6 +138,27 @@ function platformFrom(html: string, headers: Headers | null): ScanResult["platfo
   return null;
 }
 
+/**
+ * Checkout and analytics tools on the page, for revenue tracking. Shopify,
+ * WooCommerce and Google Analytics / Tag Manager expose purchase amounts the
+ * tracker reads on its own; hosted checkouts (Stripe, Paddle…) need a goal value.
+ */
+const COMMERCE: [RegExp, string, boolean][] = [
+  [/cdn\.shopify\.com|Shopify\.theme/, "Shopify", true],
+  [/\/plugins\/woocommerce\/|woocommerce-/, "WooCommerce", true],
+  [/googletagmanager\.com\/gtm\.js/, "Google Tag Manager", true],
+  [/googletagmanager\.com\/gtag\/js/, "Google Analytics", true],
+  [/js\.stripe\.com|buy\.stripe\.com/, "Stripe", false],
+  [/cdn\.paddle\.com|paddle\.js/, "Paddle", false],
+  [/lemonsqueezy\.com/, "Lemon Squeezy", false],
+  [/gumroad\.com\/js/, "Gumroad", false],
+  [/paypal\.com\/sdk|paypalobjects\.com/, "PayPal", false],
+];
+function commerceFrom(html: string): ScanResult["commerce"] {
+  const hits = COMMERCE.filter(([re]) => re.test(html));
+  return { found: hits.map(h => h[1]), auto: hits.some(h => h[2]) };
+}
+
 function isPrivateIp(ip: string): boolean {
   if (ip.includes(":")) return /^(::1|::|fc|fd|fe80|::ffff:(10|127|169\.254|192\.168)\.)/i.test(ip);
   const [a, b] = ip.split(".").map(Number);
@@ -223,6 +244,7 @@ export async function scanDomain(domain: string, siteId: string): Promise<ScanRe
     scriptFound: html.includes(`data-site="${siteId}"`) || html.includes(`data-site='${siteId}'`),
     records,
     domainConnect,
+    commerce: commerceFrom(html),
     error,
   };
 }

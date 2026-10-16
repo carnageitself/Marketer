@@ -161,6 +161,38 @@ create table if not exists custom_events (
 );
 create index if not exists custom_events_site_idx on custom_events (site_id, ts desc);
 
+-- Revenue: purchase values read from the page (Google Analytics dataLayer,
+-- Shopify, WooCommerce, schema.org Order) or sent with pagewise('track').
+-- Only the amount, currency and order id are kept. amount_usd is fixed at the
+-- day's rate when recorded; reports convert it to the site's currency.
+create table if not exists revenue_events (
+  id          bigserial primary key,
+  site_id     text not null,
+  visit_id    text not null references visits(id) on delete cascade,
+  pageview_id text,
+  ts          timestamptz not null,
+  path        text,
+  amount      numeric(14,2) not null,
+  currency    text not null,
+  amount_usd  numeric(14,2) not null,
+  source      text not null,
+  order_id    text
+);
+create unique index if not exists revenue_order_uniq on revenue_events (site_id, order_id);
+create index if not exists revenue_site_idx on revenue_events (site_id, ts desc);
+create index if not exists revenue_visit_idx on revenue_events (visit_id);
+alter table sites add column if not exists currency text not null default 'USD';
+-- Each site's demo website reports into a hidden companion site, so demo clicks
+-- never mix with real visitors. Hidden from lists, limits and usage.
+alter table sites add column if not exists demo_of text references sites(id) on delete cascade;
+create index if not exists sites_demo_idx on sites (demo_of);
+
+-- Daily ECB reference rates (per 1 EUR), cached so conversion never blocks on the network.
+create table if not exists fx_rates (
+  day    date primary key,
+  rates  jsonb not null
+);
+
 -- Repair: postgres.js once double-encoded these columns (a JSON string holding
 -- the object) because values were bound as $n::jsonb. Writes now use
 -- $n::text::jsonb; this unwraps any rows written before that.
@@ -182,4 +214,6 @@ alter table clicks         enable row level security;
 alter table custom_events  enable row level security;
 alter table user_identities enable row level security;
 alter table team_members   enable row level security;
+alter table revenue_events enable row level security;
+alter table fx_rates       enable row level security;
 `;
