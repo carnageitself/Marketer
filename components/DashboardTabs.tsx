@@ -298,22 +298,29 @@ export function SettingsTab({ site, role }: { site: SiteProps; role: string }) {
         action={msg && <Badge tone={msg.startsWith("Saved") ? "good" : "bad"}>{msg}</Badge>}>
         <div className="space-y-2.5">
           {goals.map((g, i) => (
-            <div key={g.id} className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2/40 p-2.5 md:flex-row md:items-center">
-              <Icon name="target" size={16} className="hidden text-faint md:block" />
-              <select value={g.type} className={`${field} md:w-60 md:shrink-0`} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, type: e.target.value as typeof g.type } : x))}>
-                {GOAL_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-              </select>
-              {g.type !== "app_link" && (
-                <input value={g.pattern} placeholder={GOAL_TYPES.find(t => t.id === g.type)?.hint} className={`${field} min-w-0 font-mono md:flex-[3]`}
-                  onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, pattern: e.target.value } : x))} />
-              )}
-              <input value={g.label} placeholder="Name" className={`${field} min-w-0 md:flex-[2]`} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
-              <label className="relative md:w-32 md:shrink-0" title="What one conversion is worth to you. Used for revenue when the page doesn't report a purchase amount.">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-faint">{currency}</span>
-                <input type="number" min={0} step="any" value={g.value ?? ""} placeholder="Worth" className={`${field} w-full pl-11 tabular`}
-                  onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, value: e.target.value === "" ? undefined : Number(e.target.value) } : x))} />
-              </label>
-              <button title="Remove goal" className="self-end rounded-md p-2 text-muted transition hover:bg-bad-soft hover:text-bad md:self-auto" onClick={() => setGoals(goals.filter((_, j) => j !== i))}><Icon name="trash" size={15} /></button>
+            <div key={g.id} className="space-y-2 rounded-lg border border-line bg-panel-2/40 p-3">
+              {/* Line 1: what counts as this conversion */}
+              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <Icon name="target" size={16} className="hidden text-faint md:block" />
+                <select value={g.type} aria-label="Goal type" className={`${field} md:w-64 md:shrink-0`} onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, type: e.target.value as typeof g.type } : x))}>
+                  {GOAL_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+                {g.type !== "app_link"
+                  ? <input value={g.pattern} aria-label="Pattern" placeholder={GOAL_TYPES.find(t => t.id === g.type)?.hint} className={`${field} min-w-0 flex-1 font-mono`}
+                      onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, pattern: e.target.value } : x))} />
+                  : <span className="flex-1 text-[12.5px] text-muted">Any click to another subdomain of your site, e.g. app.{"{"}your domain{"}"}</span>}
+              </div>
+              {/* Line 2: its name and what it's worth */}
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:pl-6">
+                <input value={g.label} aria-label="Goal name" placeholder="Name, e.g. Booked a demo" className={`${field} min-w-0 flex-1`}
+                  onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
+                <label className="relative md:w-40 md:shrink-0" title="What one conversion is worth to you. Used for revenue when the page doesn't report a purchase amount.">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-faint">{currency}</span>
+                  <input type="number" min={0} step="any" value={g.value ?? ""} placeholder="Worth" aria-label="Worth" className={`${field} tabular w-full pl-11`}
+                    onChange={e => setGoals(goals.map((x, j) => j === i ? { ...x, value: e.target.value === "" ? undefined : Number(e.target.value) } : x))} />
+                </label>
+                <button title="Remove goal" className="self-end rounded-md p-2 text-muted transition hover:bg-bad-soft hover:text-bad md:self-auto" onClick={() => setGoals(goals.filter((_, j) => j !== i))}><Icon name="trash" size={15} /></button>
+              </div>
             </div>
           ))}
           {!goals.length && <Empty>No goals. Without one, nothing counts as a conversion.</Empty>}
